@@ -31,7 +31,8 @@ jobs:
       
       # Run tests to ensure everything is working
       - name: Run tests
-        run: npm test
+        run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
+        shell: bash
       
       # Build the action using ncc (creates the dist directory)
       - name: Build action
@@ -94,20 +95,6 @@ jobs:
     steps:
       - name: Send notification
         # You can use various actions to send notifications to Slack, Discord, email, etc.
-        # For example, to send a Slack notification:
-        # uses: 8398a7/action-slack@v3
-        # with:
-        #   status: custom
-        #   fields: repo,message,commit,author,action,eventName,ref,workflow
-        #   custom_payload: |
-        #     {
-        #       "attachments": [{
-        #         "color": "good",
-        #         "text": "GitHub Action *${{ github.repository }}* has been published to the Marketplace with version ${{ github.event.release.tag_name }}!"
-        #       }]
-        #     }
-        # env:
-        #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           echo "Action successfully published to GitHub Marketplace!"
           echo "Version: ${{ github.event.release.tag_name }}"
