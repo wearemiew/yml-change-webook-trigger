@@ -1,0 +1,28 @@
+# Documentation configuration file
+# Shows how to use webhooks for documentation updates
+
+title: API Documentation
+version: 2.1.0
+
+# Document sections
+sections:
+  - title: Introduction
+    path: /intro
+  - title: Authentication
+    path: /auth
+  - title: Endpoints
+    path: /endpoints
+  - title: Error Codes
+    path: /errors
+
+# Generation settings
+settings:
+  theme: light
+  codeHighlighting: true
+  includeVersionHistory: true
+  enableSearch: true
+
+# When this file changes, trigger these webhooks to update documentation sites
+x-update-webhooks:
+  - https://docs.example.com/api/rebuild
+  - https://internal-docs.example.com/trigger/update

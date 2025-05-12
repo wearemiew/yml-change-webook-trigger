@@ -1,0 +1,147 @@
+name: Automated Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - '.github/workflows/test.yml'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      # Setup Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+      
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+      
+      # Run tests to ensure everything is working
+      - name: Run tests
+        run: npm test
+      
+      # Build the action using ncc (creates the dist directory)
+      - name: Build action
+        run: npm run build
+      
+      # Get package version from package.json
+      - name: Get version
+        id: package-version
+        uses: martinbeentjes/npm-get-version-action@v1.3.1
+      
+      # Determine if we need to create a new release
+      - name: Check if version exists
+        id: version-check
+        run: |
+          VERSION="v${{ steps.package-version.outputs.current-version }}"
+          echo "Version from package.json: $VERSION"
+          
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION"; then
+            echo "Version $VERSION already exists as a tag. No new release needed."
+            echo "new_release_required=false" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION does not exist yet. Creating new release."
+            echo "new_release_required=true" >> $GITHUB_OUTPUT
+            echo "release_version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+      
+      # Commit the built files if they've changed
+      - name: Commit built files
+        if: steps.version-check.outputs.new_release_required == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add dist/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Build dist files for v${{ steps.package-version.outputs.current-version }}"
+            git push
+          fi
+      
+      # Create a new release
+      - name: Create Release
+        if: steps.version-check.outputs.new_release_required == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version-check.outputs.release_version }}
+          name: Release ${{ steps.version-check.outputs.release_version }}
+          body: |
+            Automated release for version ${{ steps.version-check.outputs.release_version }}
+            
+            This release was automatically created from the latest code pushed to the main branch.
+            
+            ## What's Changed
+            * See the [commit history](https://github.com/${{ github.repository }}/commits/main) for details of changes since the last release.
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.version-check.outputs.release_version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Create or update the major version tag (e.g., v1, v2)
+      - name: Update major version tag
+        if: steps.version-check.outputs.new_release_required == 'true'
+        run: |
+          VERSION="${{ steps.version-check.outputs.release_version }}"
+          # Extract major version (e.g., "v1" from "v1.2.3")
+          MAJOR_VERSION=$(echo $VERSION | cut -d '.' -f 1)
+          
+          echo "Creating/updating major version tag: $MAJOR_VERSION"
+          
+          # Delete the major version tag locally and remotely if it exists
+          git tag -d $MAJOR_VERSION || true
+          git push origin :refs/tags/$MAJOR_VERSION || true
+          
+          # Create the major version tag pointing to the current commit
+          git tag $MAJOR_VERSION
+          git push origin $MAJOR_VERSION
+          
+          echo "Major version tag $MAJOR_VERSION now points to release $VERSION"
+
+  # This job creates the GitHub Marketplace listing if it doesn't exist yet
+  publish-to-marketplace:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    if: needs.build-and-release.outputs.new_release_required == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      # You would need to use GitHub's API to programmatically publish to the marketplace
+      # Currently, there's no direct GitHub Action for this
+      # The below is a placeholder for manual verification
+      - name: Verify Marketplace Requirements
+        run: |
+          echo "New release has been created!"
+          echo "To publish to the GitHub Marketplace:"
+          echo "1. Go to your repository releases page"
+          echo "2. Find the latest release"
+          echo "3. Edit the release"
+          echo "4. Check 'Publish this Action to the GitHub Marketplace'"
+          echo "5. Complete the additional marketplace information"
+          echo "6. Save the changes"
+          
+          echo "Note: Currently, the final step of publishing to the marketplace requires manual intervention."
+          echo "Consider using GitHub REST API for fully automated publishing in the future."

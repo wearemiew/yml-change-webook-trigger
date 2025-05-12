@@ -1,0 +1,43 @@
+name: Test Action
+on:
+  push:
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - 'src/**'
+  pull_request:
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - 'src/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run tests
+        run: npm test
+      
+      - name: Build action
+        run: npm run build
+      
+      # Self-test the action (only on push to main)
+      - name: Self-test
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./
+        with:
+          base_ref: ''

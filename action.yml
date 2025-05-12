@@ -1,0 +1,20 @@
+name: 'YML Change Webhook'
+description: 'Detects changes in YML files and triggers webhooks in response'
+author: 'Miew'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  base_ref:
+    description: 'Base reference for comparing changes (useful in PR scenarios)'
+    required: false
+    default: ''
+
+outputs:
+  changed_files:
+    description: 'JSON array of YML files that changed'
+
+runs:
+  using: 'node16'
+  main: 'dist/index.js'

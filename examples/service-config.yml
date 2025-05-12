@@ -1,0 +1,32 @@
+# Sample service configuration file
+# This demonstrates how to integrate webhook URLs into your YML files
+
+service: api-gateway
+version: 1.2.0
+
+# Service configuration settings
+config:
+  timeout: 30
+  maxRequests: 1000
+  rateLimiting: true
+  authRequired: true
+  logLevel: info
+
+# Environment-specific settings
+environments:
+  development:
+    url: https://dev-api.example.com
+    logLevel: debug
+  staging:
+    url: https://staging-api.example.com
+  production:
+    url: https://api.example.com
+    timeout: 60
+    maxRequests: 10000
+
+# Webhooks to trigger when this file changes
+# The action will automatically detect these URLs and trigger them
+x-update-webhooks:
+  - https://api.monitoring.com/notify/config-change
+  - https://deployment.example.com/api/trigger/reload-config
+  - https://alerts.example.com/api/webhook/config-updated
