@@ -64,13 +64,13 @@ jobs:
             echo "release_version=$VERSION" >> $GITHUB_OUTPUT
           fi
       
-      # Commit the built files if they've changed
+      # Force add dist directory (even if it's in .gitignore)
       - name: Commit built files
         if: steps.version-check.outputs.new_release_required == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add dist/
+          git add -f dist/
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
