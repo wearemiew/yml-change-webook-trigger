@@ -19,15 +19,15 @@ jobs:
     steps:
       # Checkout the repository
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
       # Setup Node.js environment
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: '20'
           cache: 'npm'
       
       # Install dependencies
@@ -45,7 +45,7 @@ jobs:
       # Get package version from package.json
       - name: Get version
         id: package-version
-        uses: martinbeentjes/npm-get-version-action@v1.3.1
+        uses: martinbeentjes/npm-get-version-action@main
       
       # Determine if we need to create a new release
       - name: Check if version exists
@@ -80,7 +80,7 @@ jobs:
       # Create a new release
       - name: Create Release
         if: steps.version-check.outputs.new_release_required == 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version-check.outputs.release_version }}
           name: Release ${{ steps.version-check.outputs.release_version }}
@@ -127,7 +127,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       # You would need to use GitHub's API to programmatically publish to the marketplace
       # Currently, there's no direct GitHub Action for this

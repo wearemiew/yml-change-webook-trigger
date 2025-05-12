@@ -16,5 +16,5 @@ outputs:
     description: 'JSON array of YML files that changed'
 
 runs:
-  using: 'node16'
+  using: 'node20'
   main: 'dist/index.js'
