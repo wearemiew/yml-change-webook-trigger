@@ -40,11 +40,16 @@ jobs:
           fetch-depth: 0
 
       - name: Detect YML Changes & Trigger Webhooks
-        uses: wearemiew/yml-change-webhook@v1
+        uses: wearemiew/yml-change-webhook-trigger@v1
         with:
           # Optional: Specify base reference for comparison (useful in PR scenarios)
           base_ref: ${{ github.event.pull_request.base.ref }}
 ```
+
+> **Note**: You can use any of the following tag references:
+> - `@v1` - Always points to the latest v1.x.x release
+> - `@v1.0` - Always points to the latest v1.0.x release
+> - `@v1.0.1` - Points to the specific v1.0.1 release
 
 ## Inputs
 
@@ -95,8 +100,8 @@ When this YML file changes, the action will automatically trigger all webhooks l
 
 ```bash
 # Clone the repository
-git clone https://github.com/wearemiew/yml-change-webhook.git
-cd yml-change-webhook
+git clone https://github.com/wearemiew/yml-change-webhook-trigger.git
+cd yml-change-webhook-trigger
 
 # Install dependencies
 npm install
@@ -106,6 +111,32 @@ npm install
 
 ```bash
 npm test
+```
+
+### Release Process
+
+This project uses automated GitHub Actions workflows for releases:
+
+1. When code is pushed to the `main` branch, the `auto-release.yml` workflow:
+   - Builds the action (generating the `dist` folder)
+   - Creates a new release if the version in `package.json` has been updated
+   - Updates the major version tag (e.g., `v1`) and the major.minor version tag (e.g., `v1.0`) to point to the latest release
+
+2. When a release is created, the `publish.yml` workflow:
+   - Runs tests and builds the action
+   - Commits the `dist` directory to the repository
+   - Updates the major version tag (e.g., `v1`) and the major.minor version tag (e.g., `v1.0`)
+
+To manually trigger a new release:
+
+```bash
+# Update the version in package.json
+npm version patch  # or minor or major
+
+# Push changes to main
+git push
+
+# The auto-release workflow will handle the rest
 ```
 
 ## Contributing

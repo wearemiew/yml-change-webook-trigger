@@ -2,7 +2,7 @@ name: 'YML Change Webhook'
 description: 'Detects changes in YML files and triggers webhooks in response'
 author: 'Miew'
 branding:
-  icon: 'check-circle'
+  icon: 'hook'
   color: 'blue'
 
 inputs:
