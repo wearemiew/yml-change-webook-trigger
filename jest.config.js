@@ -9,5 +9,16 @@ module.exports = {
   testMatch: [
     "**/__tests__/**/*.test.js"
   ],
-  verbose: true
+  setupFilesAfterEnv: [
+    "<rootDir>/jest.setup.js"
+  ],
+  verbose: true,
+  // Add transformIgnorePatterns to handle node_modules properly
+  transformIgnorePatterns: [
+    "/node_modules/(?!@actions/)"
+  ],
+  // Set up moduleNameMapper for problematic modules
+  moduleNameMapper: {
+    "@actions/core": "<rootDir>/__mocks__/@actions/core.js"
+  }
 };

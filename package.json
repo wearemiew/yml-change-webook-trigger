@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/index.js -o dist",
-    "test": "jest",
+    "test": "jest --config jest.config.js",
+    "test:watch": "jest --config jest.config.js --watch",
     "lint": "eslint .",
     "format": "prettier --write '**/*.{js,json,yml,yaml}'",
     "prepare": "npm run build",

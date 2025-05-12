@@ -1,8 +1,20 @@
-const parseYaml = require('../src/parse-yaml');
 const fs = require('fs');
+
+// Mock the @actions/core module
+jest.mock('@actions/core', () => ({
+  debug: jest.fn(),
+  info: jest.fn(),
+  warning: jest.fn(),
+  error: jest.fn(),
+  setOutput: jest.fn(),
+  setFailed: jest.fn()
+}));
 
 // Mock fs.readFileSync
 jest.mock('fs');
+
+// Import the module after mocking dependencies
+const parseYaml = require('../src/parse-yaml');
 
 describe('parseYaml', () => {
   describe('extractWebhooks', () => {
