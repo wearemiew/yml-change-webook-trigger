@@ -1,6 +1,6 @@
 {
-  "name": "yml-change-webhook",
-  "version": "1.0.0",
+  "name": "yml-change-webhook-trigger",
+  "version": "1.0.1",
   "description": "GitHub Action to detect YML changes and trigger webhooks",
   "main": "dist/index.js",
   "scripts": {
@@ -17,7 +17,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wearemiew/yml-change-webhook.git"
+    "url": "git+https://github.com/wearemiew/yml-change-webhook-trigger.git"
   },
   "keywords": [
     "github",
@@ -30,9 +30,9 @@
   "author": "Miew",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/wearemiew/yml-change-webhook/issues"
+    "url": "https://github.com/wearemiew/yml-change-webhook-trigger/issues"
   },
-  "homepage": "https://github.com/wearemiew/yml-change-webhook#readme",
+  "homepage": "https://github.com/wearemiew/yml-change-webhook-trigger#readme",
   "dependencies": {
     "@actions/core": "^1.10.1",
     "@actions/github": "^6.0.0",

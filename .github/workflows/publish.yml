@@ -56,24 +56,38 @@ jobs:
           # Optional: You can upload additional release assets if needed
           # gh release upload ${{ github.event.release.tag_name }} dist/index.js
       
-      # Create or update the major version tag (e.g., v1, v2)
-      - name: Update major version tag
+      # Create or update version tags (e.g., v1, v1.0, etc.)
+      - name: Update version tags
         run: |
           VERSION="${{ github.event.release.tag_name }}"
-          # Extract major version (e.g., "v1" from "v1.2.3")
-          MAJOR_VERSION=$(echo $VERSION | cut -d '.' -f 1)
+          # Remove 'v' prefix if present
+          VERSION_NUM=${VERSION#v}
           
-          echo "Creating/updating major version tag: $MAJOR_VERSION"
+          # Extract version components
+          MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
+          MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
           
-          # Delete the major version tag locally and remotely if it exists
-          git tag -d $MAJOR_VERSION || true
-          git push origin :refs/tags/$MAJOR_VERSION || true
-          
-          # Create the major version tag pointing to the current commit
-          git tag $MAJOR_VERSION
-          git push origin $MAJOR_VERSION
-          
-          echo "Major version tag $MAJOR_VERSION now points to release $VERSION"
+          # Create tags without 'v' prefix if original has it
+          if [[ "$VERSION" == v* ]]; then
+            # Create all version tags
+            echo "Creating/updating version tags"
+            
+            # Major version tag with v prefix (e.g., v1)
+            MAJOR_TAG="v$MAJOR"
+            git tag -d $MAJOR_TAG || true
+            git push origin :refs/tags/$MAJOR_TAG || true
+            git tag $MAJOR_TAG
+            git push origin $MAJOR_TAG
+            echo "Major version tag $MAJOR_TAG now points to release $VERSION"
+            
+            # Major.Minor version tag with v prefix (e.g., v1.0)
+            MAJOR_MINOR_TAG="v$MAJOR.$MINOR"
+            git tag -d $MAJOR_MINOR_TAG || true
+            git push origin :refs/tags/$MAJOR_MINOR_TAG || true
+            git tag $MAJOR_MINOR_TAG
+            git push origin $MAJOR_MINOR_TAG
+            echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION"
+          fi
       
       # Publish to GitHub Marketplace (this is automatic when you properly configure the release)
       - name: Verify Marketplace Listing
