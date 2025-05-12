@@ -24,12 +24,12 @@ name: YML Change Notification
 on:
   push:
     paths:
-      - '**.yml'
-      - '**.yaml'
+      - "**.yml"
+      - "**.yaml"
   pull_request:
     paths:
-      - '**.yml'
-      - '**.yaml'
+      - "**.yml"
+      - "**.yaml"
 
 jobs:
   notify-changes:
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      
+
       - name: Detect YML Changes & Trigger Webhooks
         uses: wearemiew/yml-change-webhook@v1
         with:
@@ -48,15 +48,15 @@ jobs:
 
 ## Inputs
 
-| Input       | Description                           | Required | Default |
-|-------------|---------------------------------------|----------|---------|
-| `base_ref`  | Base reference for comparing changes  | No       | ''      |
+| Input      | Description                          | Required | Default |
+| ---------- | ------------------------------------ | -------- | ------- |
+| `base_ref` | Base reference for comparing changes | No       | ''      |
 
 ## Outputs
 
-| Output           | Description                              |
-|------------------|------------------------------------------|
-| `changed_files`  | JSON array of YML files that changed     |
+| Output          | Description                          |
+| --------------- | ------------------------------------ |
+| `changed_files` | JSON array of YML files that changed |
 
 ## YML File Structure
 
