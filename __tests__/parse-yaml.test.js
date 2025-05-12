@@ -1,6 +1,4 @@
-const fs = require('fs');
-
-// Mock the @actions/core module
+// Mock the @actions/core module before requiring any modules
 jest.mock('@actions/core', () => ({
   debug: jest.fn(),
   info: jest.fn(),
@@ -11,9 +9,12 @@ jest.mock('@actions/core', () => ({
 }));
 
 // Mock fs.readFileSync
-jest.mock('fs');
+jest.mock('fs', () => ({
+  readFileSync: jest.fn()
+}));
 
-// Import the module after mocking dependencies
+// Now import the module
+const fs = require('fs');
 const parseYaml = require('../src/parse-yaml');
 
 describe('parseYaml', () => {

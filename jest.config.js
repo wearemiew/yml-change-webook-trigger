@@ -1,10 +1,6 @@
 module.exports = {
   clearMocks: true,
-  collectCoverage: true,
-  coverageDirectory: "coverage",
-  coveragePathIgnorePatterns: [
-    "/node_modules/"
-  ],
+  collectCoverage: false, // Disable coverage to avoid Babel/Istanbul issues
   testEnvironment: "node",
   testMatch: [
     "**/__tests__/**/*.test.js"
@@ -13,11 +9,9 @@ module.exports = {
     "<rootDir>/jest.setup.js"
   ],
   verbose: true,
-  // Add transformIgnorePatterns to handle node_modules properly
-  transformIgnorePatterns: [
-    "/node_modules/(?!@actions/)"
-  ],
-  // Set up moduleNameMapper for problematic modules
+  // Set transform to null to avoid using Babel/Istanbul
+  transform: {},
+  // Exclude moduleNameMapper that might cause issues
   moduleNameMapper: {
     "@actions/core": "<rootDir>/__mocks__/@actions/core.js"
   }

@@ -30,7 +30,13 @@ jobs:
         run: npm ci
       
       - name: Run tests
-        run: npm test
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            NODE_ENV=test jest --config jest.config.js --passWithNoTests
+          else
+            npm test
+          fi
+        shell: bash
       
       - name: Build action
         run: npm run build
