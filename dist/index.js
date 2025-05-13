@@ -41359,66 +41359,93 @@ async function run() {
 }
 
 /**
- * Generates a summary report for the webhook executions
- * 
- * @param {Array} results - Webhook execution results
- * @param {Array} changedFiles - Files that triggered webhooks
- */
+* Generates a summary report for the webhook executions
+* 
+* @param {Array} results - Webhook execution results
+* @param {Array} changedFiles - Files that triggered webhooks
+*/
 async function generateSummaryReport(results, changedFiles) {
-  try {
-    const fs = __nccwpck_require__(9896);
-    const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+try {
+const fs = __nccwpck_require__(9896);
+const summaryFile = process.env.GITHUB_STEP_SUMMARY;
 
-    if (!summaryFile) {
-      core.debug('GITHUB_STEP_SUMMARY environment variable not set. Skipping summary generation.');
-      return;
-    }
+if (!summaryFile) {
+core.debug('GITHUB_STEP_SUMMARY environment variable not set. Skipping summary generation.');
+return;
+}
 
-    let summaryContent = [];
+let summaryContent = [];
 
-    // Add header
-    summaryContent.push('# Webhook Trigger Summary');
-    summaryContent.push('');
-    summaryContent.push(`For a detailed look at webhook triggers during this workflow run. Total changed files: ${changedFiles.length}`);
-    summaryContent.push('');
+// Add header with timestamp for better tracking
+const timestamp = new Date().toISOString();
+summaryContent.push('# Webhook Trigger Summary');
+summaryContent.push('');
+summaryContent.push(`Generated at: ${timestamp}`);
+summaryContent.push(`For a detailed look at webhook triggers during this workflow run. Total changed files: ${changedFiles.length}`);
+summaryContent.push('');
 
-    // Add file summary table
-    summaryContent.push('## Files Changed');
-    summaryContent.push('');
-    summaryContent.push('| File | Webhook Count |');
-    summaryContent.push('| ---- | ------------- |');
+// Add file summary table with enhanced statistics
+summaryContent.push('## Files Changed');
+summaryContent.push('');
+summaryContent.push('| File | Webhook Count | Success Rate |');
+summaryContent.push('| ---- | ------------- | ------------ |');
 
-    // Group webhooks by file
-    const fileWebhookCount = {};
-    for (const result of results) {
-      if (!fileWebhookCount[result.file]) {
-        fileWebhookCount[result.file] = 0;
-      }
-      fileWebhookCount[result.file]++;
-    }
+// Group webhooks by file with success statistics
+const fileStats = {};
+for (const result of results) {
+if (!fileStats[result.file]) {
+  fileStats[result.file] = {
+      count: 0,
+      success: 0,
+      failed: 0
+  };
+  }
+  fileStats[result.file].count++;
+  if (result.success) {
+    fileStats[result.file].success++;
+  } else {
+    fileStats[result.file].failed++;
+  }
+}
 
-    for (const file in fileWebhookCount) {
-      summaryContent.push(`| ${file} | ${fileWebhookCount[file]} |`);
-    }
+for (const file in fileStats) {
+  const stats = fileStats[file];
+const successRate = stats.count > 0 ? `${Math.round((stats.success / stats.count) * 100)}%` : 'N/A';
+summaryContent.push(`| ${file} | ${stats.count} | ${successRate} |`);
+}
 
-    summaryContent.push('');
+summaryContent.push('');
 
-    // Add webhook execution table
-    summaryContent.push('## Webhook Executions');
-    summaryContent.push('');
-    summaryContent.push('| File | Webhook | Status | Duration |');
-    summaryContent.push('| ---- | ------- | ------ | -------- |');
+// Add webhook execution table
+summaryContent.push('## Webhook Executions');
+summaryContent.push('');
+summaryContent.push('| File | Webhook | Status | Duration | Timestamp |');
+  summaryContent.push('| ---- | ------- | ------ | -------- | --------- |');
 
-    for (const result of results) {
+  for (const result of results) {
       const status = result.success ? '✅ success' : '❌ failed';
       const duration = result.duration ? result.duration : '-';
-
-      summaryContent.push(`| ${result.file} | ${result.url} | ${status} | ${duration} |`);
+      const timestamp = result.timestamp ? new Date(result.timestamp).toLocaleTimeString() : '-';
+      
+      summaryContent.push(`| ${result.file} | ${result.url} | ${status} | ${duration} | ${timestamp} |`);
     }
-
+    
+    // Add overall statistics
+    const totalSuccess = results.filter(r => r.success).length;
+    const totalFailed = results.length - totalSuccess;
+    const overallSuccessRate = results.length > 0 ? Math.round((totalSuccess / results.length) * 100) : 0;
+    
+    summaryContent.push('');
+    summaryContent.push('## Overall Statistics');
+    summaryContent.push('');
+    summaryContent.push(`- **Total Webhooks:** ${results.length}`);
+    summaryContent.push(`- **Successful:** ${totalSuccess}`);
+    summaryContent.push(`- **Failed:** ${totalFailed}`);
+    summaryContent.push(`- **Success Rate:** ${overallSuccessRate}%`);
+    
     // Write to the summary file
     fs.appendFileSync(summaryFile, summaryContent.join('\n') + '\n');
-
+    
     core.info('Webhook execution summary generated successfully.');
   } catch (error) {
     core.warning(`Failed to generate summary report: ${error.message}`);
