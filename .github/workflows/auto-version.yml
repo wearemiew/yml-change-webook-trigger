@@ -25,9 +25,9 @@ on:
     branches:
       - main
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/dependabot.yml'
+      - "**.md"
+      - "docs/**"
+      - ".github/dependabot.yml"
 
 jobs:
   auto-version:
@@ -90,10 +90,10 @@ jobs:
 
           # Check PR title for conventional commit format
           PR_TITLE="${{ github.event.pull_request.title }}"
-          
+
           # Look for breaking changes in PR body too
           PR_BODY="${{ github.event.pull_request.body }}"
-          
+
           # Find all conventional commits in the PR
           HIGHEST_BUMP="none"
 

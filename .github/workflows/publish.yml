@@ -10,34 +10,34 @@ jobs:
     permissions:
       contents: write
       packages: write
-    
+
     steps:
       # Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       # Setup Node.js environment
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      
+          node-version: "20"
+          cache: "npm"
+
       # Install dependencies
       - name: Install dependencies
         run: npm ci
-      
+
       # Run tests to ensure everything is working
       - name: Run tests
         run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
         shell: bash
-      
+
       # Build the action using ncc (creates the dist directory)
       - name: Build action
         run: npm run build
-      
+
       # Commit the built files if they've changed (using -f to force add ignored files)
       - name: Commit built files
         run: |
@@ -46,7 +46,7 @@ jobs:
           git add -f dist/
           git diff --quiet && git diff --staged --quiet || git commit -m "Build dist files for release ${{ github.event.release.tag_name }}"
           git push
-      
+
       # Update the release with the built files
       - name: Update Release
         env:
@@ -55,18 +55,18 @@ jobs:
           echo "Updating release assets for ${{ github.event.release.tag_name }}..."
           # Optional: You can upload additional release assets if needed
           # gh release upload ${{ github.event.release.tag_name }} dist/index.js
-      
+
       # Create or update version tags (e.g., v1, v1.0, etc.)
       - name: Update version tags
         run: |
           VERSION="${{ github.event.release.tag_name }}"
           # Remove 'v' prefix if present
           VERSION_NUM=${VERSION#v}
-          
+
           # Extract version components
           MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
           MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
-          
+
           # Create tags without 'v' prefix if original has it
           if [[ "$VERSION" == v* ]]; then
             # Create all version tags
@@ -88,7 +88,7 @@ jobs:
             git push origin $MAJOR_MINOR_TAG
             echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION"
           fi
-      
+
       # Publish to GitHub Marketplace (this is automatic when you properly configure the release)
       - name: Verify Marketplace Listing
         run: |
@@ -104,8 +104,9 @@ jobs:
   # Optional: Add a notification job
   notify:
     needs: build-and-publish
-    runs-on: ubuntu-latest
-    
+    runs-on:
+      labels: [test]
+
     steps:
       - name: Send notification
         # You can use various actions to send notifications to Slack, Discord, email, etc.
