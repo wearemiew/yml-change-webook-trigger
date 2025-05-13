@@ -1,0 +1,10 @@
+name: "Version Detector"
+description: "Determines version bump type based on conventional commits"
+author: "MIEW"
+inputs: {}
+outputs:
+  bump_type:
+    description: "Determined bump type (major, minor, patch, none)"
+runs:
+  using: "node20"
+  main: "index.js"
