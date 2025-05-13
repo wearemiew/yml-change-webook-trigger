@@ -67,9 +67,11 @@ jobs:
           fi
 
       # Determine version bump type based on conventional commits in PR
+      # This version uses the simplified approach that we tested locally
       - name: Determine version bump
         id: version-bump
         if: steps.filter-ci.outputs.skip != 'true'
+        shell: bash
         run: |
           # Only run when PR is merged, not when it's just closed
           if [[ "${{ github.event.pull_request.merged }}" != "true" ]]; then
@@ -92,40 +94,40 @@ jobs:
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_BODY="${{ github.event.pull_request.body }}"
           
-          # Initialize highest bump type
+          # Initialize bump type
           HIGHEST_BUMP="none"
           
-          # Check for breaking changes in PR title
-          PR_TITLE_HAS_BREAKING_MARKER=0
-          echo "$PR_TITLE" | grep -q "^feat.*!:" && PR_TITLE_HAS_BREAKING_MARKER=1
-          echo "$PR_TITLE" | grep -q "BREAKING CHANGE" && PR_TITLE_HAS_BREAKING_MARKER=1
+          # Check for major bump (breaking changes)
+          FOUND_BREAKING=0
           
-          # Check for breaking changes in PR body
-          PR_BODY_HAS_BREAKING_CHANGE=0
-          echo "$PR_BODY" | grep -q "BREAKING CHANGE" && PR_BODY_HAS_BREAKING_CHANGE=1
+          # Check PR title for breaking change marker
+          echo "$PR_TITLE" | grep -q "^feat.*!:" && FOUND_BREAKING=1
+          echo "$PR_TITLE" | grep -q "BREAKING CHANGE" && FOUND_BREAKING=1
           
-          # Check for breaking changes in commit messages
-          COMMITS_HAVE_BREAKING_CHANGE=0
-          git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q "^feat.*BREAKING CHANGE" && COMMITS_HAVE_BREAKING_CHANGE=1
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^[a-z]*.*!:" && COMMITS_HAVE_BREAKING_CHANGE=1
+          # Check PR body for breaking change
+          echo "$PR_BODY" | grep -q "BREAKING CHANGE" && FOUND_BREAKING=1
           
-          # Check for features
-          COMMITS_HAVE_FEATURE=0
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^feat" && COMMITS_HAVE_FEATURE=1
+          # Check commits for breaking changes
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^[a-z]*.*!:" && FOUND_BREAKING=1
+          git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q "BREAKING CHANGE" && FOUND_BREAKING=1
           
-          # Check for fixes
-          COMMITS_HAVE_FIX=0
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^fix" && COMMITS_HAVE_FIX=1
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^perf" && COMMITS_HAVE_FIX=1
+          # Check for minor bump (features)
+          FOUND_FEATURE=0
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^feat" && FOUND_FEATURE=1
           
-          # Determine bump type based on the checks
-          if [[ $PR_TITLE_HAS_BREAKING_MARKER -eq 1 || $PR_BODY_HAS_BREAKING_CHANGE -eq 1 || $COMMITS_HAVE_BREAKING_CHANGE -eq 1 ]]; then
+          # Check for patch bump (fixes or perf improvements)
+          FOUND_FIX=0
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^fix" && FOUND_FIX=1
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^perf" && FOUND_FIX=1
+          
+          # Determine bump type based on findings
+          if [[ $FOUND_BREAKING -eq 1 ]]; then
             echo "Found breaking change indicator"
             HIGHEST_BUMP="major"
-          elif [[ $HIGHEST_BUMP == "none" && $COMMITS_HAVE_FEATURE -eq 1 ]]; then
+          elif [[ $FOUND_FEATURE -eq 1 ]]; then
             echo "Found feature commit"
             HIGHEST_BUMP="minor"
-          elif [[ $HIGHEST_BUMP == "none" && $COMMITS_HAVE_FIX -eq 1 ]]; then
+          elif [[ $FOUND_FIX -eq 1 ]]; then
             echo "Found fix or performance commit"
             HIGHEST_BUMP="patch"
           else
