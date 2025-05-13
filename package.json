@@ -5,8 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/index.js -o dist",
-    "test": "NODE_ENV=test jest --config jest.config.js --passWithNoTests",
-    "test:watch": "NODE_ENV=test jest --config jest.config.js --watch --passWithNoTests",
+    "test": "cross-env NODE_ENV=test jest --config jest.config.js --passWithNoTests",
+    "test:watch": "cross-env NODE_ENV=test jest --config jest.config.js --watch --passWithNoTests",
     "lint": "eslint .",
     "format": "prettier --write '**/*.{js,json,yml,yaml}'",
     "prepare": "npm run build",
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.1",
+    "cross-env": "^7.0.3",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-jest": "^27.6.3",
