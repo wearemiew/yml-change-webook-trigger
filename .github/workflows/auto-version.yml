@@ -1,7 +1,8 @@
 name: Auto Version Update
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - main
     paths:
@@ -29,47 +30,65 @@ jobs:
           node-version: '20'
           cache: 'npm'
       
-      # Determine version bump type based on conventional commits
+      # Filter out CI commits to prevent infinite loops
+      - name: Filter CI commits
+        id: filter-ci
+        run: |
+          if git log --pretty="%s" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | grep -q "\[skip ci\]"; then
+            echo "Skip CI flag found in PR commits, skipping version bump"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "No skip CI flags found, proceeding with version bump"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Determine version bump type based on conventional commits in PR
       - name: Determine version bump
         id: version-bump
+        if: steps.filter-ci.outputs.skip != 'true'
         run: |
-          # Get the latest commit message
-          LATEST_COMMIT_MSG=$(git log -1 --pretty=%B)
-          echo "Latest commit message: $LATEST_COMMIT_MSG"
-          
-          # Skip if the commit is a version bump
-          if [[ "$LATEST_COMMIT_MSG" == *"[skip ci]"* ]]; then
-            echo "Skipping version bump for version commit"
+          # Only run when PR is merged, not when it's just closed
+          if [[ "${{ github.event.pull_request.merged }}" != "true" ]]; then
+            echo "Pull request was closed without merging - skipping version bump"
             echo "bump_type=none" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          # Debugging output to see exactly what's in the commit message
-          echo "First 10 characters: ${LATEST_COMMIT_MSG:0:10}"
+          # Get the base and head SHAs for the PR
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           
-          # Extract the commit type more reliably with a regex
-          if [[ "$LATEST_COMMIT_MSG" =~ ^feat(\(|:) ]]; then
-            if [[ "$LATEST_COMMIT_MSG" == *"BREAKING CHANGE"* ]]; then
-              echo "bump_type=major" >> $GITHUB_OUTPUT
-              echo "Detected BREAKING CHANGE - will bump major version"
-            else
-              echo "bump_type=minor" >> $GITHUB_OUTPUT
-              echo "Detected feature - will bump minor version"
-            fi
-          elif [[ "$LATEST_COMMIT_MSG" =~ ^fix(\(|:) ]]; then
-            echo "bump_type=patch" >> $GITHUB_OUTPUT
-            echo "Detected fix - will bump patch version"
-          elif [[ "$LATEST_COMMIT_MSG" =~ ^perf(\(|:) ]]; then
-            echo "bump_type=patch" >> $GITHUB_OUTPUT
-            echo "Detected performance improvement - will bump patch version"
+          echo "PR from $BASE_SHA to $HEAD_SHA"
+          
+          # Get all commits in the PR
+          echo "Commits in this PR:"
+          git log --pretty=format:"%h %s" $BASE_SHA..$HEAD_SHA
+          
+          # Find all conventional commits in the PR
+          HIGHEST_BUMP="none"
+          
+          # Search for breaking changes (major bump)
+          if git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:).*BREAKING CHANGE"; then
+            echo "Found BREAKING CHANGE commit in PR"
+            HIGHEST_BUMP="major"
+          # Search for features (minor bump) if no major bump found
+          elif [[ "$HIGHEST_BUMP" == "none" ]] && git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:)"; then
+            echo "Found feature commit in PR"
+            HIGHEST_BUMP="minor"
+          # Search for fixes or performance improvements (patch bump) if no major or minor bump found
+          elif [[ "$HIGHEST_BUMP" == "none" ]] && git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^(fix|perf)(\(|:)"; then
+            echo "Found fix or performance commit in PR"
+            HIGHEST_BUMP="patch"
           else
-            echo "bump_type=none" >> $GITHUB_OUTPUT
-            echo "No conventional commit prefix detected - no version bump needed"
+            echo "No conventional commits found in PR"
           fi
+          
+          echo "Highest bump type: $HIGHEST_BUMP"
+          echo "bump_type=$HIGHEST_BUMP" >> $GITHUB_OUTPUT
       
       # Update version in package.json if bump type is not none
       - name: Update package.json version
-        if: steps.version-bump.outputs.bump_type != 'none'
+        if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
         run: |
           BUMP_TYPE=${{ steps.version-bump.outputs.bump_type }}
           echo "Bumping version: $BUMP_TYPE"
