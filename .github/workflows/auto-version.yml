@@ -27,7 +27,7 @@ jobs:
     permissions:
       contents: write
     outputs:
-      bump_type: ${{ steps.version-bump.outputs.bump_type }}
+      bump_type: ${{ steps.detect-version.outputs.bump_type }}
       new_version: ${{ steps.version-update.outputs.new_version }}
       should_release: ${{ steps.version-update.outputs.should_release }}
 
@@ -46,123 +46,17 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      # Filter out CI commits to prevent infinite loops
-      - name: Filter CI commits
-        id: filter-ci
-        run: |
-          if git log --pretty="%s" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | grep -q "\[skip ci\]"; then
-            echo "Skip CI flag found in PR commits, skipping version bump"
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "No skip CI flags found, proceeding with version bump"
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-      # Determine version bump type using a separate Node.js script
+      # Use our custom action to determine version bump
       - name: Determine version bump
-        id: version-bump
-        if: steps.filter-ci.outputs.skip != 'true'
-        run: |
-          # Only run when PR is merged, not when it's just closed
-          if [ "${{ github.event.pull_request.merged }}" != "true" ]; then
-            echo "Pull request was closed without merging - skipping version bump"
-            echo "bump_type=none" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "Creating version detection script..."
-          cat > detect-version.js << 'EOF'
-          const fs = require('fs');
-          const { execSync } = require('child_process');
-
-          // Get the base and head SHAs from environment variables
-          const baseSha = process.env.BASE_SHA;
-          const headSha = process.env.HEAD_SHA;
-          const prTitle = process.env.PR_TITLE || '';
-          const prBody = process.env.PR_BODY || '';
-
-          console.log(`Analyzing PR from ${baseSha} to ${headSha}`);
-          console.log(`PR title: ${prTitle}`);
-
-          // Get all commits in the PR
-          const commitOutput = execSync(`git log --pretty=format:"%s" ${baseSha}..${headSha}`).toString();
-          const commits = commitOutput.split('\n').filter(line => line.trim() !== '');
-          
-          console.log(`Found ${commits.length} commits:`);
-          commits.forEach(commit => console.log(`- ${commit}`));
-
-          // Initialize variables for version bump detection
-          let hasBreakingChange = false;
-          let hasFeature = false;
-          let hasFix = false;
-
-          // Check PR title for breaking changes
-          if (prTitle.match(/^feat.*!:/) || prTitle.includes('BREAKING CHANGE')) {
-            console.log('PR title indicates breaking change');
-            hasBreakingChange = true;
-          }
-
-          // Check PR body for breaking changes
-          if (prBody.includes('BREAKING CHANGE')) {
-            console.log('PR body indicates breaking change');
-            hasBreakingChange = true;
-          }
-
-          // Check commit messages
-          commits.forEach(commit => {
-            // Check for breaking changes
-            if (commit.match(/^[a-z]+.*!:/) || commit.includes('BREAKING CHANGE')) {
-              console.log(`Breaking change found in commit: ${commit}`);
-              hasBreakingChange = true;
-            }
-            // Check for features
-            else if (commit.startsWith('feat')) {
-              console.log(`Feature commit found: ${commit}`);
-              hasFeature = true;
-            }
-            // Check for fixes
-            else if (commit.startsWith('fix') || commit.startsWith('perf')) {
-              console.log(`Fix/perf commit found: ${commit}`);
-              hasFix = true;
-            }
-          });
-
-          // Determine bump type
-          let bumpType = 'none';
-          if (hasBreakingChange) {
-            bumpType = 'major';
-          } else if (hasFeature) {
-            bumpType = 'minor';
-          } else if (hasFix) {
-            bumpType = 'patch';
-          }
-
-          console.log(`Bump type: ${bumpType}`);
-
-          // Write result to an output file for GitHub Actions
-          fs.writeFileSync('bump_type.txt', bumpType);
-          console.log(`Bump type '${bumpType}' written to bump_type.txt`);
-          EOF
-
-          # Execute the Node.js script
-          export BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          export HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          export PR_TITLE="${{ github.event.pull_request.title }}"
-          export PR_BODY="${{ github.event.pull_request.body }}"
-          
-          node detect-version.js
-          
-          # Read the result
-          BUMP_TYPE=$(cat bump_type.txt)
-          echo "Detected bump type: $BUMP_TYPE"
-          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+        id: detect-version
+        uses: ./.github/actions/version-detector
 
       # Update version in package.json if bump type is not none
       - name: Update package.json version
         id: version-update
-        if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
+        if: steps.detect-version.outputs.bump_type != 'none'
         run: |
-          BUMP_TYPE=${{ steps.version-bump.outputs.bump_type }}
+          BUMP_TYPE=${{ steps.detect-version.outputs.bump_type }}
           echo "Bumping version: $BUMP_TYPE"
 
           # Get current version
@@ -197,7 +91,7 @@ jobs:
 
       # Write version info to artifact if update was needed
       - name: Save version info
-        if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
+        if: steps.detect-version.outputs.bump_type != 'none'
         run: |
           mkdir -p artifacts
           echo '{"new_version": "${{ steps.version-update.outputs.new_version }}", "should_release": ${{ steps.version-update.outputs.should_release }}}' > artifacts/version-info.json
@@ -205,7 +99,7 @@ jobs:
 
       # Upload version info artifact
       - name: Upload version info artifact
-        if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
+        if: steps.detect-version.outputs.bump_type != 'none'
         uses: actions/upload-artifact@v4
         with:
           name: version-info
