@@ -47,10 +47,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           skip-version-file: false
-          skip-commit: true
+          skip-commit: false
           git-push: true
           git-message: "chore(release): {version}"
-          skip-tag: true
+          skip-tag: false
           skip-on-empty: true
 
       # Update version in package.json if bump type is not none
