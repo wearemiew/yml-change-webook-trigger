@@ -1,0 +1,262 @@
+name: Release Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type of version bump to perform (only used for manual trigger)'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+  workflow_run:
+    workflows: ["Auto Version Update"]
+    types:
+      - completed
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      # Download workflow artifacts to get version info (only for workflow_run)
+      - name: Download workflow artifact
+        if: github.event_name == 'workflow_run'
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: auto-version.yml
+          workflow_conclusion: success
+          name: version-info
+          path: artifacts
+      
+      # Read artifact containing version info if it exists (only for workflow_run)
+      - name: Check for version artifact
+        if: github.event_name == 'workflow_run'
+        id: check-artifact
+        run: |
+          if [ -f "artifacts/version-info.json" ]; then
+            echo "artifact_exists=true" >> $GITHUB_OUTPUT
+            cat artifacts/version-info.json
+            NEW_VERSION=$(cat artifacts/version-info.json | jq -r '.new_version')
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            SHOULD_RELEASE=$(cat artifacts/version-info.json | jq -r '.should_release')
+            echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+          else
+            echo "No version artifact found. Checking commits directly."
+            echo "artifact_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Checkout the repository for all cases
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+      
+      # Manual version bump (only for workflow_dispatch)
+      - name: Manual version bump
+        if: github.event_name == 'workflow_dispatch'
+        id: manual-version
+        run: |
+          BUMP_TYPE=${{ github.event.inputs.version_bump }}
+          echo "Bumping version: $BUMP_TYPE"
+          
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Use npm version to update the version in package.json
+          npm version $BUMP_TYPE --no-git-tag-version
+          
+          # Get the new version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Verify version doesn't already exist as a tag
+          if git ls-remote --tags origin | grep -q "refs/tags/v$NEW_VERSION"; then
+            # Increment patch version again to avoid conflict
+            echo "Version v$NEW_VERSION already exists, incrementing patch version again"
+            npm version patch --no-git-tag-version
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "Adjusted new version: $NEW_VERSION"
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+          fi
+          
+          # Commit changes
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json package-lock.json
+          git commit -m "chore(release): bump version to $NEW_VERSION [skip ci]"
+          git push
+
+      # Check for version bump in recent commits (fallback for workflow_run)
+      - name: Check for version bump in recent commits
+        if: github.event_name == 'workflow_run' && steps.check-artifact.outputs.artifact_exists != 'true'
+        id: check-commits
+        run: |
+          if git log -3 --pretty=format:"%s" | grep -q "bump version to"; then
+            echo "Found version bump commit in recent history"
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "No version bump commit found in recent history"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Determine the version to release
+      - name: Setup release
+        id: setup-release
+        run: |
+          # Determine version based on source
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # For manual trigger
+            NEW_VERSION=${{ steps.manual-version.outputs.version }}
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.check-artifact.outputs.artifact_exists }}" == "true" ]; then
+            # From artifact
+            NEW_VERSION=${{ steps.check-artifact.outputs.new_version }}
+            SHOULD_RELEASE=${{ steps.check-artifact.outputs.should_release }}
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.check-commits.outputs.should_release }}" == "true" ]; then
+            # From commits
+            NEW_VERSION=${{ steps.check-commits.outputs.new_version }}
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "No version info found - nothing to release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -n "$NEW_VERSION" ]; then
+            echo "Preparing to create release for version v$NEW_VERSION"
+          fi
+      
+      # Setup Node.js environment
+      - name: Setup Node.js
+        if: steps.setup-release.outputs.should_release == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      # Install dependencies
+      - name: Install dependencies
+        if: steps.setup-release.outputs.should_release == 'true'
+        run: npm ci
+      
+      # Run tests to ensure everything is working
+      - name: Run tests
+        if: steps.setup-release.outputs.should_release == 'true'
+        run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
+        shell: bash
+      
+      # Build the action using ncc (creates the dist directory)
+      - name: Build action
+        if: steps.setup-release.outputs.should_release == 'true'
+        run: npm run build
+      
+      # Force add dist directory (even if it's in .gitignore)
+      - name: Commit built files
+        if: steps.setup-release.outputs.should_release == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -f dist/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Build dist files for v${{ steps.setup-release.outputs.version }}"
+            git push
+          fi
+      
+      # Verify tag doesn't exist before creating release
+      - name: Check if tag exists
+        if: steps.setup-release.outputs.should_release == 'true'
+        id: tag-check
+        run: |
+          VERSION="${{ steps.setup-release.outputs.release_version }}"
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION"; then
+            echo "Tag $VERSION already exists. Will update it."
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $VERSION does not exist yet. Will create it."
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Delete existing tag if it exists
+      - name: Delete existing tag
+        if: steps.setup-release.outputs.should_release == 'true' && steps.tag-check.outputs.tag_exists == 'true'
+        run: |
+          VERSION="${{ steps.setup-release.outputs.release_version }}"
+          git push --delete origin $VERSION || true
+      
+      # Create a new release
+      - name: Create Release
+        if: steps.setup-release.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.setup-release.outputs.release_version }}
+          name: Release ${{ steps.setup-release.outputs.release_version }}
+          body: |
+            Automated release for version ${{ steps.setup-release.outputs.release_version }}
+            
+            This release was automatically created after the version was bumped.
+            
+            ## What's Changed
+            * See the [commit history](https://github.com/${{ github.repository }}/commits/main) for details of changes since the last release.
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.setup-release.outputs.release_version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Create or update the major version tag (e.g., v1, v2) and other version tags
+      - name: Update version tags
+        if: steps.setup-release.outputs.should_release == 'true'
+        run: |
+          VERSION="${{ steps.setup-release.outputs.release_version }}"
+          # Remove 'v' prefix if present
+          VERSION_NUM=${VERSION#v}
+          
+          # Extract version components
+          MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
+          MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
+          
+          # Create tags without 'v' prefix if original has it
+          if [[ "$VERSION" == v* ]]; then
+            # Create all version tags
+            echo "Creating/updating version tags"
+            
+            # Major version tag with v prefix (e.g., v1)
+            MAJOR_TAG="v$MAJOR"
+            git tag -d $MAJOR_TAG || true
+            git push origin :refs/tags/$MAJOR_TAG || true
+            git tag $MAJOR_TAG
+            git push origin $MAJOR_TAG
+            echo "Major version tag $MAJOR_TAG now points to release $VERSION"
+            
+            # Major.Minor version tag with v prefix (e.g., v1.0)
+            MAJOR_MINOR_TAG="v$MAJOR.$MINOR"
+            git tag -d $MAJOR_MINOR_TAG || true
+            git push origin :refs/tags/$MAJOR_MINOR_TAG || true
+            git tag $MAJOR_MINOR_TAG
+            git push origin $MAJOR_MINOR_TAG
+            echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION"
+          fi
