@@ -151,27 +151,19 @@ npm test
 
 This project uses automated GitHub Actions workflows for releases:
 
-1. When code is pushed to the `main` branch, the `auto-release.yml` workflow:
-   - Builds the action (generating the `dist` folder)
-   - Creates a new release if the version in `package.json` has been updated
-   - Updates the major version tag (e.g., `v1`) and the major.minor version tag (e.g., `v1.0`) to point to the latest release
+1. When PRs with conventional commit messages are merged to the `main` branch:
+   - The `auto-version.yml` workflow detects the conventional commit format and bumps the version
+     - Features (`feat:`) trigger minor version bumps
+     - Fixes (`fix:`) trigger patch version bumps
+     - Breaking changes (`BREAKING CHANGE:`) trigger major version bumps
+   - The `release-workflow.yml` automatically creates a release with the new version
 
 2. When a release is created, the `publish.yml` workflow:
    - Runs tests and builds the action
    - Commits the `dist` directory to the repository
    - Updates the major version tag (e.g., `v1`) and the major.minor version tag (e.g., `v1.0`)
 
-To manually trigger a new release:
-
-```bash
-# Update the version in package.json
-npm version patch  # or minor or major
-
-# Push changes to main
-git push
-
-# The auto-release workflow will handle the rest
-```
+You can also manually trigger a release using the GitHub Actions interface by running the `Release Workflow` with your choice of version bump (patch, minor, or major).
 
 ## Contributing
 
