@@ -2,14 +2,6 @@ name: Auto Version Update
 
 # Purpose: Automatically bumps version in package.json based on conventional commits
 # when a pull request is merged to main.
-#
-# Triggers:
-# - When a PR is closed (merged) to the main branch
-#
-# Outputs:
-# - bump_type: The type of version bump (major, minor, patch, none)
-# - new_version: The new version after bumping
-# - should_release: Boolean flag indicating if a release should be created
 
 on:
   pull_request:
@@ -23,11 +15,13 @@ on:
 
 jobs:
   auto-version:
+    # Only run if PR was merged (not just closed)
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
-      bump_type: ${{ steps.detect-version.outputs.bump_type }}
+      bump_type: ${{ steps.conventional-commits.outputs.bump_type }}
       new_version: ${{ steps.version-update.outputs.new_version }}
       should_release: ${{ steps.version-update.outputs.should_release }}
 
@@ -46,17 +40,26 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      # Use our custom action to determine version bump
-      - name: Determine version bump
-        id: detect-version
-        uses: ./.github/actions/version-detector
-
+      # Determine version bump using a proven action
+      - name: Conventional Commits Analysis
+        id: conventional-commits
+        uses: TriPSs/conventional-changelog-action@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          output-file: false
+          skip-version-file: true
+          skip-commit: true
+          git-push: false
+          git-message: 'chore(release): {version}'
+          skip-tag: true
+          skip-on-empty: true
+          
       # Update version in package.json if bump type is not none
       - name: Update package.json version
         id: version-update
-        if: steps.detect-version.outputs.bump_type != 'none'
+        if: steps.conventional-commits.outputs.bump_type != ''
         run: |
-          BUMP_TYPE=${{ steps.detect-version.outputs.bump_type }}
+          BUMP_TYPE=${{ steps.conventional-commits.outputs.bump_type }}
           echo "Bumping version: $BUMP_TYPE"
 
           # Get current version
@@ -91,7 +94,7 @@ jobs:
 
       # Write version info to artifact if update was needed
       - name: Save version info
-        if: steps.detect-version.outputs.bump_type != 'none'
+        if: steps.conventional-commits.outputs.bump_type != ''
         run: |
           mkdir -p artifacts
           echo '{"new_version": "${{ steps.version-update.outputs.new_version }}", "should_release": ${{ steps.version-update.outputs.should_release }}}' > artifacts/version-info.json
@@ -99,7 +102,7 @@ jobs:
 
       # Upload version info artifact
       - name: Upload version info artifact
-        if: steps.detect-version.outputs.bump_type != 'none'
+        if: steps.conventional-commits.outputs.bump_type != ''
         uses: actions/upload-artifact@v4
         with:
           name: version-info
