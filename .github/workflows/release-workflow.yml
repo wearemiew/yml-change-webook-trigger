@@ -256,7 +256,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit in dist/ directory."
           else
-            git commit -m "Build dist files for v${{ steps.setup-release.outputs.version }} [skip ci]"
+            git commit -m "ci: Build dist files for v${{ steps.setup-release.outputs.version }} [skip ci]"
             git push
           fi
 
