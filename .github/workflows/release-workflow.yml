@@ -21,301 +21,328 @@ on:
           - minor
           - major
   workflow_run:
-    workflows: ["Auto Version Update"]
+    workflows: ["Auto Version Update"] # Name of the workflow that triggers this one
     types:
       - completed
 
-# Add concurrency control
+# Add concurrency control to prevent multiple runs for the same ref from running simultaneously
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: false # Set to true if you want to cancel ongoing runs for the same group
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # This job should run if the triggering workflow ('Auto Version Update') was successful,
+    # OR if the workflow was triggered manually via workflow_dispatch.
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
-      contents: write
-      packages: write
+      contents: write # Needed to push new tags, commit package.json changes, and create releases
+      packages: write # If you are publishing packages to GitHub Packages (not used in this example but good practice if needed)
 
     steps:
-      # Download workflow artifacts to get version info (only for workflow_run)
+      # Step 1: Download workflow artifacts (only for workflow_run trigger)
+      # This step attempts to download an artifact named 'version-info' which should contain
+      # the new version details from the 'Auto Version Update' workflow.
       - name: Download workflow artifact
         if: github.event_name == 'workflow_run'
         id: download-artifact
-        continue-on-error: true
-        uses: dawidd6/action-download-artifact@v2
+        continue-on-error: true # If artifact download fails, we'll try other methods
+        uses: dawidd6/action-download-artifact@v2 # Using a community action to download artifacts
         with:
-          workflow: auto-version.yml
-          workflow_conclusion: success
-          name: version-info
-          path: artifacts
+          workflow: auto-version.yml # Name of the workflow file that produced the artifact
+          workflow_conclusion: success # Only download if the producing workflow was successful
+          name: version-info # Name of the artifact to download
+          path: artifacts # Directory to download the artifact to
 
-      # Read artifact containing version info if it exists (only for workflow_run)
+      # Step 2: Read artifact containing version info if it exists (only for workflow_run)
+      # This step checks if the 'version-info.json' artifact was successfully downloaded
+      # and extracts 'new_version' and 'should_release' from it.
       - name: Check for version artifact
         if: github.event_name == 'workflow_run'
         id: check-artifact
         run: |
           if [ -d "artifacts" ] && [ -f "artifacts/version-info.json" ]; then
+            echo "Artifact found. Reading version info."
             echo "artifact_exists=true" >> $GITHUB_OUTPUT
-            cat artifacts/version-info.json
+            cat artifacts/version-info.json # Display artifact content for debugging
+            # Extract new_version and should_release using jq
             NEW_VERSION=$(cat artifacts/version-info.json | jq -r '.new_version')
             echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
             SHOULD_RELEASE=$(cat artifacts/version-info.json | jq -r '.should_release')
             echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
           else
-            echo "No version artifact found or could not be downloaded. Checking package.json." 
+            echo "No version artifact found or could not be downloaded. Will check package.json or commits."
             echo "artifact_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # Checkout the repository for all cases
+      # Step 3: Checkout the repository
+      # This step is needed to access the repository's code, like package.json or commit history.
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 5
+          fetch-depth: 5 # Fetch last 5 commits, adjust if more history is needed for version checks
 
-      # Manual version bump (only for workflow_dispatch)
+      # Step 4: Manual version bump (only for workflow_dispatch trigger)
+      # If the workflow is triggered manually, this step bumps the version in package.json
+      # based on the user's input (patch, minor, major).
       - name: Manual version bump
         if: github.event_name == 'workflow_dispatch'
         id: manual-version
         run: |
           BUMP_TYPE=${{ github.event.inputs.version_bump }}
           echo "Bumping version: $BUMP_TYPE"
-          
-          # Get current version
+
+          # Get current version from package.json
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "Current version: $CURRENT_VERSION"
-          
-          # Use npm version to update the version in package.json
+
+          # Use npm version to update the version in package.json and package-lock.json
+          # --no-git-tag-version prevents npm from creating a git tag itself, as we'll do it later.
           npm version $BUMP_TYPE --no-git-tag-version
-          
-          # Get the new version
+
+          # Get the new version from package.json
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "New version: $NEW_VERSION"
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
-          
-          # Verify version doesn't already exist as a tag
+          echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT # For release tag (e.g., v1.2.3)
+
+          # Verify version doesn't already exist as a tag. If it does, increment patch again.
+          # This is a safeguard against re-running a manual bump for an already tagged version.
           if git ls-remote --tags origin | grep -q "refs/tags/v$NEW_VERSION"; then
-            # Increment patch version again to avoid conflict
-            echo "Version v$NEW_VERSION already exists, incrementing patch version again"
+            echo "Version v$NEW_VERSION already exists as a tag. Incrementing patch version again to avoid conflict."
             npm version patch --no-git-tag-version
             NEW_VERSION=$(node -p "require('./package.json').version")
             echo "Adjusted new version: $NEW_VERSION"
+            # Update the outputs with the re-adjusted version
             echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
             echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
           fi
-          
-          # Commit changes
+
+          # Commit changes to package.json and package-lock.json
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add package.json package-lock.json
-          git commit -m "chore(release): bump version to $NEW_VERSION [skip ci]"
-          git push
+          # Check if there are changes to commit before attempting to commit
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(release): bump version to $NEW_VERSION [skip ci]"
+            git push
+          else
+            echo "No changes to package.json or package-lock.json to commit."
+          fi
 
-      # Check for version bump in recent commits (fallback for workflow_run)
-      - name: Check for version bump in recent commits
+      # Step 5: Check for version bump in recent commits (fallback for workflow_run if artifact is missing)
+      # If triggered by 'workflow_run' and the artifact wasn't found, this step tries to determine
+      # the version from package.json directly or by looking for "bump version to" in recent commit messages.
+      - name: Check for version bump in recent commits or package.json
         if: github.event_name == 'workflow_run' && steps.check-artifact.outputs.artifact_exists != 'true'
         id: check-commits
         run: |
-          # First try to directly check package.json version
-          NEW_VERSION=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
-          echo "Current package.json version: $NEW_VERSION"
-          
-          if [ "$NEW_VERSION" != "unknown" ]; then
-            # We found a valid version in package.json
-            echo "Found version $NEW_VERSION in package.json"
-            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
+          # Attempt to read version directly from package.json first
+          NEW_VERSION_PKG=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
+          echo "Current package.json version: $NEW_VERSION_PKG"
+
+          if [ "$NEW_VERSION_PKG" != "unknown" ]; then
+            echo "Found version $NEW_VERSION_PKG in package.json."
+            echo "new_version=$NEW_VERSION_PKG" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT # Assume if version is found, we should release
           elif git log -3 --pretty=format:"%s" | grep -q "bump version to"; then
-            # Fallback - check recent commits for version bumps
-            echo "Found version bump commit in recent history"
+            # Fallback: Check recent commits for version bump messages
+            echo "Found 'bump version to' commit in recent history."
+            # Extract version number from the latest commit message matching the pattern
             BUMP_VERSION=$(git log -1 --pretty=format:"%s" | grep -oP "bump version to \K[0-9.]+" || echo "unknown")
             
             if [ "$BUMP_VERSION" != "unknown" ]; then
-              echo "Extracted version $BUMP_VERSION from commit message"
+              echo "Extracted version $BUMP_VERSION from commit message."
               echo "new_version=$BUMP_VERSION" >> $GITHUB_OUTPUT
             else
-              # Default to using package.json version if we can't extract from commit
-              NEW_VERSION=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
-              echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT  
+              # If extraction fails, default to package.json version (even if it was 'unknown' before, try again or set as unknown)
+              echo "Could not extract version from commit. Using package.json version as fallback."
+              echo "new_version=$NEW_VERSION_PKG" >> $GITHUB_OUTPUT # This might be 'unknown'
             fi
-            
             echo "should_release=true" >> $GITHUB_OUTPUT
           else
-            echo "No version bump commit found in recent history"
+            echo "No version bump commit found in recent history and package.json version is unknown or not found."
+            echo "new_version=unknown" >> $GITHUB_OUTPUT
             echo "should_release=false" >> $GITHUB_OUTPUT
           fi
 
-      # Determine the version to release
-      - name: Setup release
+      # Step 6: Determine the version to release and if a release should be made
+      # This step consolidates version information from the previous steps (manual, artifact, commits)
+      # and sets final 'version', 'release_version', and 'should_release' outputs.
+      - name: Setup release variables
         id: setup-release
         run: |
-          # Determine version based on source
+          NEW_VERSION=""
+          SHOULD_RELEASE="false"
+
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # For manual trigger
-            NEW_VERSION=${{ steps.manual-version.outputs.version }}
-            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
+            # For manual trigger, use version from the manual-version step
+            NEW_VERSION="${{ steps.manual-version.outputs.version }}"
+            SHOULD_RELEASE="true"
+            echo "Source: Manual trigger (workflow_dispatch)"
           elif [ "${{ steps.check-artifact.outputs.artifact_exists }}" == "true" ]; then
-            # From artifact
-            NEW_VERSION=${{ steps.check-artifact.outputs.new_version }}
-            SHOULD_RELEASE=${{ steps.check-artifact.outputs.should_release }}
-            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+            # If artifact exists, use version from the artifact
+            NEW_VERSION="${{ steps.check-artifact.outputs.new_version }}"
+            SHOULD_RELEASE="${{ steps.check-artifact.outputs.should_release }}"
+            echo "Source: Version artifact"
           elif [ "${{ steps.check-commits.outputs.should_release }}" == "true" ]; then
-            # From commits
-            NEW_VERSION=${{ steps.check-commits.outputs.new_version }}
-            if [ -z "$NEW_VERSION" ] || [ "$NEW_VERSION" == "unknown" ]; then
-              echo "Could not determine a valid version - cannot release"
-              echo "should_release=false" >> $GITHUB_OUTPUT
-            else
-              echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-              echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
-              echo "should_release=true" >> $GITHUB_OUTPUT
-            fi
+            # If no artifact but commits check yielded a version, use that
+            NEW_VERSION="${{ steps.check-commits.outputs.new_version }}"
+            SHOULD_RELEASE="true" # If check-commits decided to release, honor it
+            echo "Source: Commit history / package.json fallback"
           else
-            echo "No version info found - nothing to release"
+            echo "No version information found from any source. No release will be made."
+          fi
+
+          # Validate the determined NEW_VERSION
+          if [ -z "$NEW_VERSION" ] || [ "$NEW_VERSION" == "unknown" ]; then
+            echo "Could not determine a valid version. Cannot release."
+            SHOULD_RELEASE="false"
+            # Set outputs even if not releasing to avoid errors in later steps' conditions
+            echo "version=unknown" >> $GITHUB_OUTPUT
+            echo "release_version=unknown" >> $GITHUB_OUTPUT
             echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Version to release: $NEW_VERSION"
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT # e.g. v1.2.3
+            echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
           fi
-          
-          if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
+
+          if [ "$SHOULD_RELEASE" == "true" ]; then
             echo "Preparing to create release for version v$NEW_VERSION"
+          else
+            echo "Skipping release creation as should_release is false or version is unknown."
           fi
-      
-      # Setup Node.js environment
+
+      # Step 7: Setup Node.js environment
+      # Only run if a release is determined to be necessary and a valid version is found.
       - name: Setup Node.js
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      
-      # Install dependencies
+          node-version: "20" # Specify Node.js version
+          cache: "npm" # Cache npm dependencies
+
+      # Step 8: Install dependencies
       - name: Install dependencies
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
-        run: npm ci
-      
-      # Run tests to ensure everything is working
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
+        run: npm ci # Use 'ci' for cleaner installs in CI environments
+
+      # Step 9: Run tests
+      # Ensures the code is in a good state before building and releasing.
       - name: Run tests
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
         shell: bash
-      
-      # Build the action using ncc (creates the dist directory)
+
+      # Step 10: Build the action (e.g., using ncc)
+      # This step compiles the action code into a 'dist' directory.
       - name: Build action
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
-        run: npm run build
-      
-      # Force add dist directory (even if it's in .gitignore)
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
+        run: npm run build # Assumes 'build' script is defined in package.json (e.g., "build": "ncc build index.js -o dist")
+
+      # Step 11: Commit built files (dist directory)
+      # The 'dist' directory is often in .gitignore, so '-f' (force) is used to add it.
+      # This ensures the compiled action code is part of the commit that the release tag will point to.
       - name: Commit built files
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add -f dist/
+          git add -f dist/ # Force add the dist directory
+          # Check if there are changes to commit before attempting to commit
           if git diff --staged --quiet; then
-            echo "No changes to commit."
+            echo "No changes to commit in dist/ directory."
           else
-            git commit -m "Build dist files for v${{ steps.setup-release.outputs.version }}"
+            git commit -m "Build dist files for v${{ steps.setup-release.outputs.version }} [skip ci]"
             git push
           fi
 
-      # Create or Update Release using GitHub CLI
+      # Step 12: Create or Update GitHub Release
+      # Uses the GitHub CLI (gh) to create a new release or update an existing one.
       - name: Create or Update Release
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.setup-release.outputs.release_version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GITHUB_TOKEN is automatically available
+          RELEASE_TAG: ${{ steps.setup-release.outputs.release_version }} # e.g., v1.2.3
         run: |
-          VERSION_TAG="${{ steps.setup-release.outputs.release_version }}"
-          
-          # Check if the release already exists
-          if gh release view "$VERSION_TAG" &> /dev/null; then
+          VERSION_TAG="${{ steps.setup-release.outputs.release_version }}" # e.g. v1.2.3
+
+          echo "Attempting to create or update release for tag: $VERSION_TAG"
+
+          # Check if the release tag already exists on the remote
+          # If it does, we might want to update the tag to point to the current commit.
+          # This is important if the build or version bump happened after the tag was initially pushed by npm (if not using --no-git-tag-version)
+          # or if we are re-running a release for an existing version with updated build artifacts.
+
+          # Ensure the local tag exists and points to the current HEAD
+          git tag -f $VERSION_TAG HEAD # Force update local tag to current commit
+          echo "Updated local tag $VERSION_TAG to point to HEAD."
+
+          # Push the tag (and force it if it exists on remote to update it)
+          # This ensures the tag associated with the release points to the commit with the build artifacts.
+          echo "Pushing tag $VERSION_TAG to remote. Forcing update if it exists."
+          git push origin $VERSION_TAG --force
+
+          # Check if the release already exists using GitHub CLI
+          if gh release view "$VERSION_TAG" --repo "${{ github.repository }}" &> /dev/null; then
             echo "Release $VERSION_TAG already exists. Updating it."
-            
-            # If tag exists, we need to delete and recreate it to ensure it points to the latest commit
-            if git ls-remote --tags origin | grep -q "refs/tags/$VERSION_TAG"; then
-              echo "Updating existing tag $VERSION_TAG"
-              git tag -d $VERSION_TAG 2>/dev/null || true
-              git push --delete origin $VERSION_TAG 2>/dev/null || true
-              git tag $VERSION_TAG
-              git push origin $VERSION_TAG
-            fi
-            
-            # Update the release with the latest changes
+            # Update the existing release
+            # Note: gh release edit does not allow changing assets directly,
+            # but it can update title, notes, draft status, etc.
+            # If you need to re-upload assets, you might need to delete and recreate or use gh release upload.
+            # For simplicity, this example updates notes and ensures it's not a draft.
             gh release edit "$VERSION_TAG" \
               --title "Release $VERSION_TAG" \
-              --notes "Automated release for version $VERSION_TAG
-
-This release was automatically created after the version was bumped.
-
-## What's Changed
-* See the [commit history](https://github.com/${{ github.repository }}/commits/main) for details of changes since the last release.
-
-**Full Changelog**: https://github.com/${{ github.repository }}/commits/$VERSION_TAG" \
+              --notes $"Automated release for version $VERSION_TAG (updated).\n\nThis release was automatically created/updated after the version was bumped.\n\nWhat's Changed: See the commit history: https://github.com/${GITHUB_REPOSITORY}/commits/main for details of changes since the last release. Changelog: https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG" \
               --draft=false \
-              --repo "${{ github.repository }}"
+              --repo "${GITHUB_REPOSITORY}"
             
             echo "Release $VERSION_TAG updated successfully."
           else
             echo "Creating new release $VERSION_TAG"
-            
-            # Create the tag if it doesn't exist
-            if ! git ls-remote --tags origin | grep -q "refs/tags/$VERSION_TAG"; then
-              git tag $VERSION_TAG
-              git push origin $VERSION_TAG
-            fi
-            
             # Create a new release
             gh release create "$VERSION_TAG" \
               --title "Release $VERSION_TAG" \
-              --notes "Automated release for version $VERSION_TAG
-
-This release was automatically created after the version was bumped.
-
-## What's Changed
-* See the [commit history](https://github.com/${{ github.repository }}/commits/main) for details of changes since the last release.
-
-**Full Changelog**: https://github.com/${{ github.repository }}/commits/$VERSION_TAG" \
+              --notes $"Automated release for version $VERSION_TAG.\n\nThis release was automatically created after the version was bumped.\n\nWhat's Changed: See the commit history: https://github.com/${GITHUB_REPOSITORY}/commits/main for details of changes since the last release. Changelog: https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG" \
               --draft=false \
-              --repo "${{ github.repository }}"
+              --repo "${GITHUB_REPOSITORY}"
             
             echo "Release $VERSION_TAG created successfully."
           fi
-      
-      # Create or update the major version tag (e.g., v1, v2) and other version tags
-      - name: Update version tags
-        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
+
+      # Step 13: Update major/minor version tags (e.g., v1, v1.2)
+      # This makes it easy for users to refer to the latest major or major.minor version.
+      - name: Update version tags (major, major.minor)
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         run: |
-          VERSION="${{ steps.setup-release.outputs.release_version }}"
-          # Remove 'v' prefix if present
-          VERSION_NUM=${VERSION#v}
-          
-          # Extract version components
+          VERSION_WITH_V_PREFIX="${{ steps.setup-release.outputs.release_version }}" # e.g., v1.2.3
+          # Remove 'v' prefix to get just the number
+          VERSION_NUM=${VERSION_WITH_V_PREFIX#v} # e.g., 1.2.3
+
+          # Extract version components (MAJOR, MINOR)
           MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
           MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
-          
-          # Create tags without 'v' prefix if original has it
-          if [[ "$VERSION" == v* ]]; then
-            # Create all version tags
-            echo "Creating/updating version tags"
+
+          # Only proceed if we have a 'v' prefix, indicating a standard semver tag
+          if [[ "$VERSION_WITH_V_PREFIX" == v* ]]; then
+            echo "Creating/updating floating version tags (e.g., v1, v1.2)"
             
-            # Major version tag with v prefix (e.g., v1)
+            # Major version tag (e.g., v1)
             MAJOR_TAG="v$MAJOR"
-            git tag -d $MAJOR_TAG || true
-            git push origin :refs/tags/$MAJOR_TAG || true
-            git tag $MAJOR_TAG
-            git push origin $MAJOR_TAG
-            echo "Major version tag $MAJOR_TAG now points to release $VERSION"
+            echo "Updating tag $MAJOR_TAG to point to $VERSION_WITH_V_PREFIX"
+            git tag -f $MAJOR_TAG $VERSION_WITH_V_PREFIX # Create/update local tag to point to the full version tag
+            git push origin $MAJOR_TAG --force # Push the major tag, force to update if it exists
+            echo "Major version tag $MAJOR_TAG now points to release $VERSION_WITH_V_PREFIX"
             
-            # Major.Minor version tag with v prefix (e.g., v1.0)
+            # Major.Minor version tag (e.g., v1.0)
             MAJOR_MINOR_TAG="v$MAJOR.$MINOR"
-            git tag -d $MAJOR_MINOR_TAG || true
-            git push origin :refs/tags/$MAJOR_MINOR_TAG || true
-            git tag $MAJOR_MINOR_TAG
-            git push origin $MAJOR_MINOR_TAG
-            echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION"
+            echo "Updating tag $MAJOR_MINOR_TAG to point to $VERSION_WITH_V_PREFIX"
+            git tag -f $MAJOR_MINOR_TAG $VERSION_WITH_V_PREFIX # Create/update local tag
+            git push origin $MAJOR_MINOR_TAG --force # Push the major.minor tag, force to update
+            echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION_WITH_V_PREFIX"
+          else
+            echo "Skipping floating tags as the release version does not start with 'v'."
           fi
