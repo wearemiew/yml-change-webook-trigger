@@ -1,10 +1,33 @@
 name: Auto Version Update
 
+# Purpose: Automatically bumps version in package.json based on conventional commits
+# when a pull request is merged to main.
+#
+# Triggers:
+# - When a PR is closed (merged) to the main branch
+#
+# Outputs:
+# - bump_type: The type of version bump (major, minor, patch, none)
+# - new_version: The new version after bumping
+# - should_release: Boolean flag indicating if a release should be created
+#
+# Dependencies:
+# - release-workflow.yml (triggered by completion of this workflow)
+#
+# Notes:
+# - Uses conventional commits to determine version bump type
+# - Skips version bump if [skip ci] is found in commit messages
+# - Creates version-info.json artifact for use by release-workflow.yml
+
 on:
   pull_request:
     types: [closed]
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/dependabot.yml'
 
 jobs:
   auto-version:
@@ -65,12 +88,25 @@ jobs:
           echo "Commits in this PR:"
           git log --pretty=format:"%h %s" $BASE_SHA..$HEAD_SHA
 
+          # Check PR title for conventional commit format
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          
+          # Look for breaking changes in PR body too
+          PR_BODY="${{ github.event.pull_request.body }}"
+          
           # Find all conventional commits in the PR
           HIGHEST_BUMP="none"
 
+          # First check PR title and body for breaking change indicators
+          if [[ "$PR_TITLE" =~ ^feat(\(.+\))?!: || "$PR_TITLE" =~ BREAKING[ -]CHANGE || "$PR_BODY" =~ BREAKING[ -]CHANGE ]]; then
+            echo "Found breaking change in PR title or body"
+            HIGHEST_BUMP="major"
           # Search for breaking changes (major bump)
-          if git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:).*BREAKING CHANGE"; then
+          elif git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:).*BREAKING CHANGE"; then
             echo "Found BREAKING CHANGE commit in PR"
+            HIGHEST_BUMP="major"
+          elif git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^[a-z]+(\(.+\))?!:"; then
+            echo "Found breaking change indicator (!) in commit"
             HIGHEST_BUMP="major"
           # Search for features (minor bump) if no major bump found
           elif [[ "$HIGHEST_BUMP" == "none" ]] && git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:)"; then

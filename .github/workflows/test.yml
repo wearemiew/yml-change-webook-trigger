@@ -1,45 +1,119 @@
 name: Test Action
+
+# Purpose: Runs tests for the action to ensure everything works correctly.
+# Triggers:
+# - On push to paths affecting functionality
+# - On pull request to paths affecting functionality
+# Outputs:
+# - Test results and build verification
+
 on:
   push:
     paths:
-      - "**.yml"
-      - "**.yaml"
       - "src/**"
+      - "**.y{a,}ml"
+      - "package*.json"
+      - "jest.config.js"
+    branches-ignore:
+      - "dependabot/**"
+      - "docs/**"
   pull_request:
     paths:
-      - "**.yml"
-      - "**.yaml"
       - "src/**"
+      - "**.y{a,}ml"
+      - "package*.json"
+      - "jest.config.js"
+    branches:
+      - main
+      - "feature/**"
+
+# Add concurrency control to prevent multiple workflows from running simultaneously
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on:
-      labels: [test]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+      fail-fast: false
+    
     steps:
+      # Checkout the repository code
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      # Set up Node.js environment with enhanced caching
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node-version }}
           cache: "npm"
+          cache-dependency-path: package-lock.json
 
+      # Cache build artifacts
+      - name: Cache build results
+        uses: actions/cache@v3
+        with:
+          path: dist
+          key: ${{ runner.os }}-${{ matrix.node-version }}-dist-${{ hashFiles('src/**') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.node-version }}-dist-${{ hashFiles('src/**') }}-
+            ${{ runner.os }}-${{ matrix.node-version }}-dist-
+
+      # Cache Jest for faster tests
+      - name: Cache Jest
+        uses: actions/cache@v3
+        with:
+          path: node_modules/.cache/jest
+          key: ${{ runner.os }}-${{ matrix.node-version }}-jest-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/*.js') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.node-version }}-jest-${{ hashFiles('**/package-lock.json') }}-
+            ${{ runner.os }}-${{ matrix.node-version }}-jest-
+
+      # Install Node.js dependencies
       - name: Install dependencies
         run: npm ci
 
+      # Run tests with Jest
       - name: Run tests
         run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
         shell: bash
 
+      # Security check for dependencies
+      - name: Security audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      # Build the action using ncc
       - name: Build action
         run: npm run build
 
-      # Self-test the action (only on push to main)
+      # Self-test the action (only on push to main and only for Node 20)
       - name: Self-test
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node-version == '20.x'
         uses: ./
         with:
           base_ref: ""
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run linting
+        run: npm run lint

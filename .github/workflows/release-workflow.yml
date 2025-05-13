@@ -1,12 +1,20 @@
 name: Release Workflow
 
+# Purpose: Creates and publishes a new release when version is updated.
+# Triggers:
+# - Workflow dispatch (manual trigger with version choice)
+# - When Auto Version Update workflow completes successfully
+# Outputs:
+# - GitHub release
+# - Updated version tags
+
 on:
   workflow_dispatch:
     inputs:
       version_bump:
-        description: 'Type of version bump to perform (only used for manual trigger)'
+        description: "Type of version bump to perform (only used for manual trigger)"
         required: false
-        default: 'patch'
+        default: "patch"
         type: choice
         options:
           - patch
@@ -17,6 +25,11 @@ on:
     types:
       - completed
 
+# Add concurrency control
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -24,20 +37,20 @@ jobs:
     permissions:
       contents: write
       packages: write
-    
+
     steps:
       # Download workflow artifacts to get version info (only for workflow_run)
       - name: Download workflow artifact
         if: github.event_name == 'workflow_run'
         id: download-artifact
         continue-on-error: true
-        uses: dawidd6/action-download-artifact@v2
+        uses: dawidd6/action-download-artifact@v9
         with:
           workflow: auto-version.yml
           workflow_conclusion: success
           name: version-info
           path: artifacts
-      
+
       # Read artifact containing version info if it exists (only for workflow_run)
       - name: Check for version artifact
         if: github.event_name == 'workflow_run'
@@ -60,7 +73,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 5
-      
+
       # Manual version bump (only for workflow_dispatch)
       - name: Manual version bump
         if: github.event_name == 'workflow_dispatch'
@@ -68,20 +81,20 @@ jobs:
         run: |
           BUMP_TYPE=${{ github.event.inputs.version_bump }}
           echo "Bumping version: $BUMP_TYPE"
-          
+
           # Get current version
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "Current version: $CURRENT_VERSION"
-          
+
           # Use npm version to update the version in package.json
           npm version $BUMP_TYPE --no-git-tag-version
-          
+
           # Get the new version
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "New version: $NEW_VERSION"
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
-          
+
           # Verify version doesn't already exist as a tag
           if git ls-remote --tags origin | grep -q "refs/tags/v$NEW_VERSION"; then
             # Increment patch version again to avoid conflict
@@ -92,7 +105,7 @@ jobs:
             echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
             echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
           fi
-          
+
           # Commit changes
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -108,7 +121,7 @@ jobs:
           # First try to directly check package.json version
           NEW_VERSION=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
           echo "Current package.json version: $NEW_VERSION"
-          
+
           if [ "$NEW_VERSION" != "unknown" ]; then
             # We found a valid version in package.json
             echo "Found version $NEW_VERSION in package.json"
@@ -167,35 +180,47 @@ jobs:
             echo "No version info found - nothing to release"
             echo "should_release=false" >> $GITHUB_OUTPUT
           fi
-          
+
           if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
             echo "Preparing to create release for version v$NEW_VERSION"
           fi
-      
-      # Setup Node.js environment
+
+      # Setup Node.js environment with enhanced caching
       - name: Setup Node.js
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      # Cache build artifacts
+      - name: Cache build results
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
+        uses: actions/cache@v3
+        with:
+          path: dist
+          key: ${{ runner.os }}-dist-${{ hashFiles('src/**') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-dist-${{ hashFiles('src/**') }}-
+            ${{ runner.os }}-dist-
+
       # Install dependencies
       - name: Install dependencies
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: npm ci
-      
+
       # Run tests to ensure everything is working
       - name: Run tests
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
         shell: bash
-      
+
       # Build the action using ncc (creates the dist directory)
       - name: Build action
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: npm run build
-      
+
       # Force add dist directory (even if it's in .gitignore)
       - name: Commit built files
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
@@ -209,7 +234,7 @@ jobs:
             git commit -m "Build dist files for v${{ steps.setup-release.outputs.version }}"
             git push
           fi
-      
+
       # Verify tag doesn't exist before creating release
       - name: Check if tag exists
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
@@ -223,14 +248,14 @@ jobs:
             echo "Tag $VERSION does not exist yet. Will create it."
             echo "tag_exists=false" >> $GITHUB_OUTPUT
           fi
-      
+
       # Delete existing tag if it exists
       - name: Delete existing tag
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != '' && steps.tag-check.outputs.tag_exists == 'true'
         run: |
           VERSION="${{ steps.setup-release.outputs.release_version }}"
           git push --delete origin $VERSION || true
-      
+
       # Create a new release
       - name: Create Release
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
@@ -240,19 +265,19 @@ jobs:
           name: Release ${{ steps.setup-release.outputs.release_version }}
           body: |
             Automated release for version ${{ steps.setup-release.outputs.release_version }}
-            
+
             This release was automatically created after the version was bumped.
-            
+
             ## What's Changed
             * See the [commit history](https://github.com/${{ github.repository }}/commits/main) for details of changes since the last release.
-            
+
             **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.setup-release.outputs.release_version }}
           draft: false
           prerelease: false
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       # Create or update the major version tag (e.g., v1, v2) and other version tags
       - name: Update version tags
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
@@ -260,11 +285,11 @@ jobs:
           VERSION="${{ steps.setup-release.outputs.release_version }}"
           # Remove 'v' prefix if present
           VERSION_NUM=${VERSION#v}
-          
+
           # Extract version components
           MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
           MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
-          
+
           # Create tags without 'v' prefix if original has it
           if [[ "$VERSION" == v* ]]; then
             # Create all version tags
