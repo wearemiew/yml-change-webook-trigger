@@ -1,0 +1,38 @@
+name: Security Audit
+
+# Purpose: Perform regular security checks on dependencies
+# This workflow runs weekly and on-demand to scan for security vulnerabilities
+# It helps maintain a secure codebase by regularly checking dependencies
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Run weekly on Sundays at midnight
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+        
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'yml-change-webhook-trigger'
+          path: '.'
+          format: 'HTML'
+          out: 'reports'
+          
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: reports
