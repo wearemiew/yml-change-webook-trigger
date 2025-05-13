@@ -88,38 +88,50 @@ jobs:
           echo "Commits in this PR:"
           git log --pretty=format:"%h %s" $BASE_SHA..$HEAD_SHA
 
-          # Check PR title for conventional commit format
+          # Get PR title and body
           PR_TITLE="${{ github.event.pull_request.title }}"
-
-          # Look for breaking changes in PR body too
           PR_BODY="${{ github.event.pull_request.body }}"
-
-          # Find all conventional commits in the PR
+          
+          # Initialize highest bump type
           HIGHEST_BUMP="none"
-
-          # First check PR title and body for breaking change indicators
-          if grep -q -E "^feat\(.+\)!:" <<< "$PR_TITLE" || grep -q "BREAKING CHANGE" <<< "$PR_TITLE" || grep -q "BREAKING CHANGE" <<< "$PR_BODY"; then
-            echo "Found breaking change in PR title or body"
+          
+          # Check for breaking changes in PR title
+          PR_TITLE_HAS_BREAKING_MARKER=0
+          echo "$PR_TITLE" | grep -q "^feat.*!:" && PR_TITLE_HAS_BREAKING_MARKER=1
+          echo "$PR_TITLE" | grep -q "BREAKING CHANGE" && PR_TITLE_HAS_BREAKING_MARKER=1
+          
+          # Check for breaking changes in PR body
+          PR_BODY_HAS_BREAKING_CHANGE=0
+          echo "$PR_BODY" | grep -q "BREAKING CHANGE" && PR_BODY_HAS_BREAKING_CHANGE=1
+          
+          # Check for breaking changes in commit messages
+          COMMITS_HAVE_BREAKING_CHANGE=0
+          git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q "^feat.*BREAKING CHANGE" && COMMITS_HAVE_BREAKING_CHANGE=1
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^[a-z]*.*!:" && COMMITS_HAVE_BREAKING_CHANGE=1
+          
+          # Check for features
+          COMMITS_HAVE_FEATURE=0
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^feat" && COMMITS_HAVE_FEATURE=1
+          
+          # Check for fixes
+          COMMITS_HAVE_FIX=0
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^fix" && COMMITS_HAVE_FIX=1
+          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^perf" && COMMITS_HAVE_FIX=1
+          
+          # Determine bump type based on the checks
+          if [[ $PR_TITLE_HAS_BREAKING_MARKER -eq 1 || $PR_BODY_HAS_BREAKING_CHANGE -eq 1 || $COMMITS_HAVE_BREAKING_CHANGE -eq 1 ]]; then
+            echo "Found breaking change indicator"
             HIGHEST_BUMP="major"
-          # Search for breaking changes (major bump)
-          elif git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:).*BREAKING CHANGE"; then
-            echo "Found BREAKING CHANGE commit in PR"
-            HIGHEST_BUMP="major"
-          elif git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^[a-z]+(\(.+\))!:"; then
-            echo "Found breaking change indicator (!) in commit"
-            HIGHEST_BUMP="major"
-          # Search for features (minor bump) if no major bump found
-          elif [[ "$HIGHEST_BUMP" == "none" ]] && git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:)"; then
-            echo "Found feature commit in PR"
+          elif [[ $HIGHEST_BUMP == "none" && $COMMITS_HAVE_FEATURE -eq 1 ]]; then
+            echo "Found feature commit"
             HIGHEST_BUMP="minor"
-          # Search for fixes or performance improvements (patch bump) if no major or minor bump found
-          elif [[ "$HIGHEST_BUMP" == "none" ]] && git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^(fix|perf)(\(|:)"; then
-            echo "Found fix or performance commit in PR"
+          elif [[ $HIGHEST_BUMP == "none" && $COMMITS_HAVE_FIX -eq 1 ]]; then
+            echo "Found fix or performance commit"
             HIGHEST_BUMP="patch"
           else
-            echo "No conventional commits found in PR"
+            echo "No conventional commits found"
           fi
-
+          
           echo "Highest bump type: $HIGHEST_BUMP"
           echo "bump_type=$HIGHEST_BUMP" >> $GITHUB_OUTPUT
 
