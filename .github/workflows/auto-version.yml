@@ -1,0 +1,86 @@
+name: Auto Version Update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'action.yml'
+
+jobs:
+  auto-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Setup Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      # Determine version bump type based on conventional commits
+      - name: Determine version bump
+        id: version-bump
+        run: |
+          # Get the latest commit message
+          LATEST_COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Latest commit message: $LATEST_COMMIT_MSG"
+          
+          # Skip if the commit is a version bump
+          if [[ "$LATEST_COMMIT_MSG" == *"[skip ci]"* ]]; then
+            echo "Skipping version bump for version commit"
+            echo "bump_type=none" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Determine bump type based on commit message prefix
+          if [[ "$LATEST_COMMIT_MSG" == feat* ]]; then
+            if [[ "$LATEST_COMMIT_MSG" == *"BREAKING CHANGE"* ]]; then
+              echo "bump_type=major" >> $GITHUB_OUTPUT
+              echo "Detected BREAKING CHANGE - will bump major version"
+            else
+              echo "bump_type=minor" >> $GITHUB_OUTPUT
+              echo "Detected feature - will bump minor version"
+            fi
+          elif [[ "$LATEST_COMMIT_MSG" == fix* ]]; then
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "Detected fix - will bump patch version"
+          elif [[ "$LATEST_COMMIT_MSG" == perf* ]]; then
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "Detected performance improvement - will bump patch version"
+          else
+            echo "bump_type=none" >> $GITHUB_OUTPUT
+            echo "No conventional commit prefix detected - no version bump needed"
+          fi
+      
+      # Update version in package.json if bump type is not none
+      - name: Update package.json version
+        if: steps.version-bump.outputs.bump_type != 'none'
+        run: |
+          BUMP_TYPE=${{ steps.version-bump.outputs.bump_type }}
+          echo "Bumping version: $BUMP_TYPE"
+          
+          # Use npm version to update the version in package.json
+          npm version $BUMP_TYPE --no-git-tag-version
+          
+          # Get the new version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "New version: $NEW_VERSION"
+          
+          # Commit changes
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json package-lock.json
+          git commit -m "chore(release): bump version to $NEW_VERSION [skip ci]"
+          git push
