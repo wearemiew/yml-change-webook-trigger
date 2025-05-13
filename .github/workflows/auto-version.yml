@@ -44,8 +44,11 @@ jobs:
             exit 0
           fi
           
-          # Determine bump type based on commit message prefix
-          if [[ "$LATEST_COMMIT_MSG" == feat* ]]; then
+          # Debugging output to see exactly what's in the commit message
+          echo "First 10 characters: ${LATEST_COMMIT_MSG:0:10}"
+          
+          # Extract the commit type more reliably with a regex
+          if [[ "$LATEST_COMMIT_MSG" =~ ^feat(\(|:) ]]; then
             if [[ "$LATEST_COMMIT_MSG" == *"BREAKING CHANGE"* ]]; then
               echo "bump_type=major" >> $GITHUB_OUTPUT
               echo "Detected BREAKING CHANGE - will bump major version"
@@ -53,10 +56,10 @@ jobs:
               echo "bump_type=minor" >> $GITHUB_OUTPUT
               echo "Detected feature - will bump minor version"
             fi
-          elif [[ "$LATEST_COMMIT_MSG" == fix* ]]; then
+          elif [[ "$LATEST_COMMIT_MSG" =~ ^fix(\(|:) ]]; then
             echo "bump_type=patch" >> $GITHUB_OUTPUT
             echo "Detected fix - will bump patch version"
-          elif [[ "$LATEST_COMMIT_MSG" == perf* ]]; then
+          elif [[ "$LATEST_COMMIT_MSG" =~ ^perf(\(|:) ]]; then
             echo "bump_type=patch" >> $GITHUB_OUTPUT
             echo "Detected performance improvement - will bump patch version"
           else
