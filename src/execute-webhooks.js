@@ -66,7 +66,7 @@ async function executeWebhooks(webhooks) {
 }
 
 /**
- * Masks part of the URL for security when logging
+ * Masks part of the URL for security when logging.
  * 
  * @param {string} url - The webhook URL
  * @returns {string} Masked URL
