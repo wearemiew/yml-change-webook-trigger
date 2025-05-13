@@ -29,6 +29,8 @@ jobs:
       # Download workflow artifacts to get version info (only for workflow_run)
       - name: Download workflow artifact
         if: github.event_name == 'workflow_run'
+        id: download-artifact
+        continue-on-error: true
         uses: dawidd6/action-download-artifact@v2
         with:
           workflow: auto-version.yml
@@ -41,7 +43,7 @@ jobs:
         if: github.event_name == 'workflow_run'
         id: check-artifact
         run: |
-          if [ -f "artifacts/version-info.json" ]; then
+          if [ -d "artifacts" ] && [ -f "artifacts/version-info.json" ]; then
             echo "artifact_exists=true" >> $GITHUB_OUTPUT
             cat artifacts/version-info.json
             NEW_VERSION=$(cat artifacts/version-info.json | jq -r '.new_version')
@@ -49,7 +51,7 @@ jobs:
             SHOULD_RELEASE=$(cat artifacts/version-info.json | jq -r '.should_release')
             echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
           else
-            echo "No version artifact found. Checking commits directly."
+            echo "No version artifact found or could not be downloaded. Checking package.json." 
             echo "artifact_exists=false" >> $GITHUB_OUTPUT
           fi
 
@@ -103,10 +105,29 @@ jobs:
         if: github.event_name == 'workflow_run' && steps.check-artifact.outputs.artifact_exists != 'true'
         id: check-commits
         run: |
-          if git log -3 --pretty=format:"%s" | grep -q "bump version to"; then
-            echo "Found version bump commit in recent history"
-            NEW_VERSION=$(node -p "require('./package.json').version")
+          # First try to directly check package.json version
+          NEW_VERSION=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
+          echo "Current package.json version: $NEW_VERSION"
+          
+          if [ "$NEW_VERSION" != "unknown" ]; then
+            # We found a valid version in package.json
+            echo "Found version $NEW_VERSION in package.json"
             echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          elif git log -3 --pretty=format:"%s" | grep -q "bump version to"; then
+            # Fallback - check recent commits for version bumps
+            echo "Found version bump commit in recent history"
+            BUMP_VERSION=$(git log -1 --pretty=format:"%s" | grep -oP "bump version to \K[0-9.]+" || echo "unknown")
+            
+            if [ "$BUMP_VERSION" != "unknown" ]; then
+              echo "Extracted version $BUMP_VERSION from commit message"
+              echo "new_version=$BUMP_VERSION" >> $GITHUB_OUTPUT
+            else
+              # Default to using package.json version if we can't extract from commit
+              NEW_VERSION=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
+              echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT  
+            fi
+            
             echo "should_release=true" >> $GITHUB_OUTPUT
           else
             echo "No version bump commit found in recent history"
@@ -134,21 +155,26 @@ jobs:
           elif [ "${{ steps.check-commits.outputs.should_release }}" == "true" ]; then
             # From commits
             NEW_VERSION=${{ steps.check-commits.outputs.new_version }}
-            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
+            if [ -z "$NEW_VERSION" ] || [ "$NEW_VERSION" == "unknown" ]; then
+              echo "Could not determine a valid version - cannot release"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+            else
+              echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+              echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+              echo "should_release=true" >> $GITHUB_OUTPUT
+            fi
           else
             echo "No version info found - nothing to release"
             echo "should_release=false" >> $GITHUB_OUTPUT
           fi
           
-          if [ -n "$NEW_VERSION" ]; then
+          if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
             echo "Preparing to create release for version v$NEW_VERSION"
           fi
       
       # Setup Node.js environment
       - name: Setup Node.js
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -156,23 +182,23 @@ jobs:
       
       # Install dependencies
       - name: Install dependencies
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: npm ci
       
       # Run tests to ensure everything is working
       - name: Run tests
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
         shell: bash
       
       # Build the action using ncc (creates the dist directory)
       - name: Build action
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: npm run build
       
       # Force add dist directory (even if it's in .gitignore)
       - name: Commit built files
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -186,7 +212,7 @@ jobs:
       
       # Verify tag doesn't exist before creating release
       - name: Check if tag exists
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         id: tag-check
         run: |
           VERSION="${{ steps.setup-release.outputs.release_version }}"
@@ -200,14 +226,14 @@ jobs:
       
       # Delete existing tag if it exists
       - name: Delete existing tag
-        if: steps.setup-release.outputs.should_release == 'true' && steps.tag-check.outputs.tag_exists == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != '' && steps.tag-check.outputs.tag_exists == 'true'
         run: |
           VERSION="${{ steps.setup-release.outputs.release_version }}"
           git push --delete origin $VERSION || true
       
       # Create a new release
       - name: Create Release
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.setup-release.outputs.release_version }}
@@ -229,7 +255,7 @@ jobs:
       
       # Create or update the major version tag (e.g., v1, v2) and other version tags
       - name: Update version tags
-        if: steps.setup-release.outputs.should_release == 'true'
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != ''
         run: |
           VERSION="${{ steps.setup-release.outputs.release_version }}"
           # Remove 'v' prefix if present
