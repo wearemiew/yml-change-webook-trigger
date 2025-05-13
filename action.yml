@@ -15,7 +15,7 @@ outputs:
   changed_files:
     description: "JSON array of YML files that changed"
   webhook_results:
-    description: "JSON array of webhook execution results with file mappings"
+    description: "JSON array of webhook execution results with file mappings."
 
 runs:
   using: "node20"
