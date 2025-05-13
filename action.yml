@@ -1,22 +1,22 @@
-name: 'YML Change Webhook'
-description: 'Detects changes in YML files and triggers webhooks in response'
-author: 'Miew'
+name: "YML Change Webhook"
+description: "Detects changes in YML files and triggers webhooks in response"
+author: "Miew"
 branding:
-  icon: 'hook'
-  color: 'blue'
+  icon: "hook"
+  color: "blue"
 
 inputs:
   base_ref:
-    description: 'Base reference for comparing changes (useful in PR scenarios)'
+    description: "Base reference for comparing changes (useful in PR scenarios)"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   changed_files:
-    description: 'JSON array of YML files that changed'
+    description: "JSON array of YML files that changed"
   webhook_results:
-    description: 'JSON array of webhook execution results with file mappings'
+    description: "JSON array of webhook execution results with file mappings"
 
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
+  using: "node20"
+  main: "dist/index.js"

@@ -7,6 +7,7 @@ const core = require('@actions/core');
  * @param {string} baseRef - Base reference for comparison (optional)
  * @returns {string[]} Array of changed YML file paths
  */
+
 function detectChanges(baseRef) {
   try {
     let command;
