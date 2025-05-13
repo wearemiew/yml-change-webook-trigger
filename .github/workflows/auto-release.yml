@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - '.github/workflows/test.yml'
+    paths:
+      - 'package.json'
+      - 'src/**'
+      - 'dist/**'
+      - 'action.yml'
 
 jobs:
   build-and-release:
