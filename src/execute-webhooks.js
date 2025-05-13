@@ -4,16 +4,27 @@ const core = require('@actions/core');
 /**
  * Execute webhooks with POST requests
  * 
- * @param {string[]} webhooks - Array of webhook URLs to execute
+ * @param {Array<{url: string, file: string}>} webhooks - Array of webhook objects with URLs and source files
  * @returns {Promise<Array>} Array of execution results
  */
 async function executeWebhooks(webhooks) {
   const results = [];
-  const uniqueWebhooks = [...new Set(webhooks)]; // Remove duplicates
+  // Create unique webhooks while preserving file origin
+  const uniqueWebhooks = [];
+  const seenUrls = new Set();
+  
+  for (const webhook of webhooks) {
+    if (!seenUrls.has(webhook.url)) {
+      seenUrls.add(webhook.url);
+      uniqueWebhooks.push(webhook);
+    }
+  }
   
   core.debug(`Preparing to execute ${uniqueWebhooks.length} unique webhook(s)`);
   
-  for (const url of uniqueWebhooks) {
+  for (const webhook of uniqueWebhooks) {
+    const url = webhook.url;
+    const file = webhook.file;
     try {
       core.info(`Executing webhook: ${maskUrl(url)}`);
       
@@ -22,10 +33,15 @@ async function executeWebhooks(webhooks) {
         timestamp: new Date().toISOString()
       });
       
+      const executionTime = response.headers['x-response-time'] || 'unknown';
+      
       results.push({
         url: maskUrl(url),
+        file: file,
         success: true,
-        status: response.status
+        status: response.status,
+        duration: executionTime,
+        timestamp: new Date().toISOString()
       });
       
       core.info(`Webhook executed successfully: ${maskUrl(url)} (Status: ${response.status})`);
@@ -36,8 +52,10 @@ async function executeWebhooks(webhooks) {
       
       results.push({
         url: maskUrl(url),
+        file: file,
         success: false,
-        error: errorMessage
+        error: errorMessage,
+        timestamp: new Date().toISOString()
       });
       
       core.warning(`Webhook execution failed: ${maskUrl(url)} - ${errorMessage}`);

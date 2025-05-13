@@ -12,6 +12,7 @@ The `yml-change-webhook` GitHub Action automates the process of monitoring YML f
 
 - **Intelligent Change Detection**: Accurately identifies which YML files have been modified in both `push` and `pull_request` events
 - **Webhook Automation**: Extracts webhook URLs from YML files and triggers them automatically
+- **Detailed Reporting**: Generates a summary report of triggered webhooks and their execution status
 - **Flexible Configuration**: Works with customizable options to fit your specific workflow requirements
 - **Seamless Integration**: Easily incorporate into any GitHub workflow that relies on YML configuration
 
@@ -59,9 +60,10 @@ jobs:
 
 ## Outputs
 
-| Output          | Description                          |
-| --------------- | ------------------------------------ |
-| `changed_files` | JSON array of YML files that changed |
+| Output            | Description                                              |
+| ----------------- | -------------------------------------------------------- |
+| `changed_files`   | JSON array of YML files that changed                      |
+| `webhook_results` | JSON array of webhook execution results with file mappings |
 
 ## YML File Structure
 
@@ -81,6 +83,38 @@ x-update-webhooks:
 ```
 
 When this YML file changes, the action will automatically trigger all webhooks listed in the `x-update-webhooks` array.
+
+## Webhook Execution Report
+
+The action automatically generates a detailed report of webhook executions directly in the GitHub Actions workflow summary. This report includes:
+
+- A summary of files that triggered webhooks
+- A detailed list of all webhook executions with their status and duration
+
+This report helps you quickly identify which files triggered which webhooks and whether those webhook calls were successful.
+
+Example report:
+
+```markdown
+# Webhook Trigger Summary
+
+For a detailed look at webhook triggers during this workflow run. Total changed files: 2
+
+## Files Changed
+
+| File | Webhook Count |
+| ---- | ------------- |
+| config/api.yml | 1 |
+| settings/notifications.yml | 2 |
+
+## Webhook Executions
+
+| File | Webhook | Status | Duration |
+| ---- | ------- | ------ | -------- |
+| config/api.yml | https://example.com/webhook1 | ✅ success | 340ms |
+| settings/notifications.yml | https://example.com/webhook2 | ✅ success | 220ms |
+| settings/notifications.yml | https://example.com/webhook3 | ❌ failed | - |
+```
 
 ## Use Cases
 
