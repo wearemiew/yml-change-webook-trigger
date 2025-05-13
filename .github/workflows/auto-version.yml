@@ -93,12 +93,27 @@ jobs:
           BUMP_TYPE=${{ steps.version-bump.outputs.bump_type }}
           echo "Bumping version: $BUMP_TYPE"
           
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+          
           # Use npm version to update the version in package.json
           npm version $BUMP_TYPE --no-git-tag-version
           
           # Get the new version
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Verify version doesn't already exist as a tag
+          if git ls-remote --tags origin | grep -q "refs/tags/v$NEW_VERSION"; then
+            # Increment patch version again to avoid conflict
+            echo "Version v$NEW_VERSION already exists, incrementing patch version again"
+            npm version patch --no-git-tag-version
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "Adjusted new version: $NEW_VERSION"
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          fi
           
           # Commit changes
           git config --local user.email "action@github.com"

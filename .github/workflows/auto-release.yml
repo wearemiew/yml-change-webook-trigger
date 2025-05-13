@@ -1,6 +1,7 @@
 name: Automated Build and Release
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -56,9 +57,13 @@ jobs:
           VERSION="v${{ steps.package-version.outputs.current-version }}"
           echo "Version from package.json: $VERSION"
           
+          # This is a safeguard - our auto-version workflow should ensure this condition is false
           if git ls-remote --tags origin | grep -q "refs/tags/$VERSION"; then
-            echo "Version $VERSION already exists as a tag. No new release needed."
-            echo "new_release_required=false" >> $GITHUB_OUTPUT
+            echo "Warning: Version $VERSION already exists as a tag."
+            echo "This should have been handled by the auto-version workflow."
+            echo "Force proceeding with release creation anyway."
+            echo "new_release_required=true" >> $GITHUB_OUTPUT
+            echo "release_version=$VERSION" >> $GITHUB_OUTPUT
           else
             echo "Version $VERSION does not exist yet. Creating new release."
             echo "new_release_required=true" >> $GITHUB_OUTPUT
