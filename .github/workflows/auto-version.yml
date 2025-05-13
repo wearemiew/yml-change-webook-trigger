@@ -25,9 +25,9 @@ on:
     branches:
       - main
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/dependabot.yml'
+      - "**.md"
+      - "docs/**"
+      - ".github/dependabot.yml"
 
 jobs:
   auto-version:
@@ -90,22 +90,22 @@ jobs:
 
           # Check PR title for conventional commit format
           PR_TITLE="${{ github.event.pull_request.title }}"
-          
+
           # Look for breaking changes in PR body too
           PR_BODY="${{ github.event.pull_request.body }}"
-          
+
           # Find all conventional commits in the PR
           HIGHEST_BUMP="none"
 
           # First check PR title and body for breaking change indicators
-          if [[ "$PR_TITLE" =~ ^feat(\(.+\))?!: || "$PR_TITLE" =~ BREAKING[ -]CHANGE || "$PR_BODY" =~ BREAKING[ -]CHANGE ]]; then
+          if grep -q -E "^feat\(.+\)!:" <<< "$PR_TITLE" || grep -q "BREAKING CHANGE" <<< "$PR_TITLE" || grep -q "BREAKING CHANGE" <<< "$PR_BODY"; then
             echo "Found breaking change in PR title or body"
             HIGHEST_BUMP="major"
           # Search for breaking changes (major bump)
           elif git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q -E "^feat(\(|:).*BREAKING CHANGE"; then
             echo "Found BREAKING CHANGE commit in PR"
             HIGHEST_BUMP="major"
-          elif git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^[a-z]+(\(.+\))?!:"; then
+          elif git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q -E "^[a-z]+(\(.+\))!:"; then
             echo "Found breaking change indicator (!) in commit"
             HIGHEST_BUMP="major"
           # Search for features (minor bump) if no major bump found

@@ -147,6 +147,16 @@ npm install
 npm test
 ```
 
+### Local Development
+
+The `dist` directory containing the compiled code is not checked into the repository during development. When developing locally:
+
+1. Make your changes to the source files
+2. Run `npm run build` to create the `dist` directory locally
+3. Test your changes with `npm test`
+
+The `dist` directory is only built and included in the repository when a release is created.
+
 ### Release Process
 
 This project uses automated GitHub Actions workflows for releases:
@@ -160,7 +170,7 @@ This project uses automated GitHub Actions workflows for releases:
 
 2. When a release is created, the `publish.yml` workflow:
    - Runs tests and builds the action
-   - Commits the `dist` directory to the repository
+   - Commits the `dist` directory to the repository (even though it's in .gitignore)
    - Updates the major version tag (e.g., `v1`) and the major.minor version tag (e.g., `v1.0`)
 
 You can also manually trigger a release using the GitHub Actions interface by running the `Release Workflow` with your choice of version bump (patch, minor, or major).
