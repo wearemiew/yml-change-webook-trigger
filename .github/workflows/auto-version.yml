@@ -43,17 +43,16 @@ jobs:
       # Determine version bump using a proven action
       - name: Conventional Commits Analysis
         id: conventional-commits
-        uses: TriPSs/conventional-changelog-action@v4
+        uses: TriPSs/conventional-changelog-action@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          output-file: false
-          skip-version-file: true
+          skip-version-file: false
           skip-commit: true
           git-push: false
-          git-message: 'chore(release): {version}'
+          git-message: "chore(release): {version}"
           skip-tag: true
           skip-on-empty: true
-          
+
       # Update version in package.json if bump type is not none
       - name: Update package.json version
         id: version-update
