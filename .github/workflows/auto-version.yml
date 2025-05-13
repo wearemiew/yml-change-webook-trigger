@@ -10,14 +10,6 @@ name: Auto Version Update
 # - bump_type: The type of version bump (major, minor, patch, none)
 # - new_version: The new version after bumping
 # - should_release: Boolean flag indicating if a release should be created
-#
-# Dependencies:
-# - release-workflow.yml (triggered by completion of this workflow)
-#
-# Notes:
-# - Uses conventional commits to determine version bump type
-# - Skips version bump if [skip ci] is found in commit messages
-# - Creates version-info.json artifact for use by release-workflow.yml
 
 on:
   pull_request:
@@ -66,76 +58,104 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      # Determine version bump type based on conventional commits in PR
-      # This version uses the simplified approach that we tested locally
+      # Determine version bump type using a separate Node.js script
       - name: Determine version bump
         id: version-bump
         if: steps.filter-ci.outputs.skip != 'true'
-        shell: bash
         run: |
           # Only run when PR is merged, not when it's just closed
-          if [[ "${{ github.event.pull_request.merged }}" != "true" ]]; then
+          if [ "${{ github.event.pull_request.merged }}" != "true" ]; then
             echo "Pull request was closed without merging - skipping version bump"
             echo "bump_type=none" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Get the base and head SHAs for the PR
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Creating version detection script..."
+          cat > detect-version.js << 'EOF'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
 
-          echo "PR from $BASE_SHA to $HEAD_SHA"
+          // Get the base and head SHAs from environment variables
+          const baseSha = process.env.BASE_SHA;
+          const headSha = process.env.HEAD_SHA;
+          const prTitle = process.env.PR_TITLE || '';
+          const prBody = process.env.PR_BODY || '';
 
-          # Get all commits in the PR
-          echo "Commits in this PR:"
-          git log --pretty=format:"%h %s" $BASE_SHA..$HEAD_SHA
+          console.log(`Analyzing PR from ${baseSha} to ${headSha}`);
+          console.log(`PR title: ${prTitle}`);
 
-          # Get PR title and body
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
+          // Get all commits in the PR
+          const commitOutput = execSync(`git log --pretty=format:"%s" ${baseSha}..${headSha}`).toString();
+          const commits = commitOutput.split('\n').filter(line => line.trim() !== '');
           
-          # Initialize bump type
-          HIGHEST_BUMP="none"
+          console.log(`Found ${commits.length} commits:`);
+          commits.forEach(commit => console.log(`- ${commit}`));
+
+          // Initialize variables for version bump detection
+          let hasBreakingChange = false;
+          let hasFeature = false;
+          let hasFix = false;
+
+          // Check PR title for breaking changes
+          if (prTitle.match(/^feat.*!:/) || prTitle.includes('BREAKING CHANGE')) {
+            console.log('PR title indicates breaking change');
+            hasBreakingChange = true;
+          }
+
+          // Check PR body for breaking changes
+          if (prBody.includes('BREAKING CHANGE')) {
+            console.log('PR body indicates breaking change');
+            hasBreakingChange = true;
+          }
+
+          // Check commit messages
+          commits.forEach(commit => {
+            // Check for breaking changes
+            if (commit.match(/^[a-z]+.*!:/) || commit.includes('BREAKING CHANGE')) {
+              console.log(`Breaking change found in commit: ${commit}`);
+              hasBreakingChange = true;
+            }
+            // Check for features
+            else if (commit.startsWith('feat')) {
+              console.log(`Feature commit found: ${commit}`);
+              hasFeature = true;
+            }
+            // Check for fixes
+            else if (commit.startsWith('fix') || commit.startsWith('perf')) {
+              console.log(`Fix/perf commit found: ${commit}`);
+              hasFix = true;
+            }
+          });
+
+          // Determine bump type
+          let bumpType = 'none';
+          if (hasBreakingChange) {
+            bumpType = 'major';
+          } else if (hasFeature) {
+            bumpType = 'minor';
+          } else if (hasFix) {
+            bumpType = 'patch';
+          }
+
+          console.log(`Bump type: ${bumpType}`);
+
+          // Write result to an output file for GitHub Actions
+          fs.writeFileSync('bump_type.txt', bumpType);
+          console.log(`Bump type '${bumpType}' written to bump_type.txt`);
+          EOF
+
+          # Execute the Node.js script
+          export BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          export HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          export PR_TITLE="${{ github.event.pull_request.title }}"
+          export PR_BODY="${{ github.event.pull_request.body }}"
           
-          # Check for major bump (breaking changes)
-          FOUND_BREAKING=0
+          node detect-version.js
           
-          # Check PR title for breaking change marker
-          echo "$PR_TITLE" | grep -q "^feat.*!:" && FOUND_BREAKING=1
-          echo "$PR_TITLE" | grep -q "BREAKING CHANGE" && FOUND_BREAKING=1
-          
-          # Check PR body for breaking change
-          echo "$PR_BODY" | grep -q "BREAKING CHANGE" && FOUND_BREAKING=1
-          
-          # Check commits for breaking changes
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^[a-z]*.*!:" && FOUND_BREAKING=1
-          git log --pretty="%s %b" $BASE_SHA..$HEAD_SHA | grep -q "BREAKING CHANGE" && FOUND_BREAKING=1
-          
-          # Check for minor bump (features)
-          FOUND_FEATURE=0
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^feat" && FOUND_FEATURE=1
-          
-          # Check for patch bump (fixes or perf improvements)
-          FOUND_FIX=0
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^fix" && FOUND_FIX=1
-          git log --pretty="%s" $BASE_SHA..$HEAD_SHA | grep -q "^perf" && FOUND_FIX=1
-          
-          # Determine bump type based on findings
-          if [[ $FOUND_BREAKING -eq 1 ]]; then
-            echo "Found breaking change indicator"
-            HIGHEST_BUMP="major"
-          elif [[ $FOUND_FEATURE -eq 1 ]]; then
-            echo "Found feature commit"
-            HIGHEST_BUMP="minor"
-          elif [[ $FOUND_FIX -eq 1 ]]; then
-            echo "Found fix or performance commit"
-            HIGHEST_BUMP="patch"
-          else
-            echo "No conventional commits found"
-          fi
-          
-          echo "Highest bump type: $HIGHEST_BUMP"
-          echo "bump_type=$HIGHEST_BUMP" >> $GITHUB_OUTPUT
+          # Read the result
+          BUMP_TYPE=$(cat bump_type.txt)
+          echo "Detected bump type: $BUMP_TYPE"
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
 
       # Update version in package.json if bump type is not none
       - name: Update package.json version
