@@ -15,6 +15,8 @@ The `yml-change-webhook` GitHub Action automates the process of monitoring YML f
 - **Detailed Reporting**: Generates a summary report of triggered webhooks and their execution status
 - **Flexible Configuration**: Works with customizable options to fit your specific workflow requirements
 - **Seamless Integration**: Easily incorporate into any GitHub workflow that relies on YML configuration
+- **Reliability**: Handles webhook failures with retries and detailed error reporting
+- **Parallel Processing**: Efficiently processes multiple webhooks for better performance
 
 ## Usage
 
@@ -102,18 +104,25 @@ For a detailed look at webhook triggers during this workflow run. Total changed 
 
 ## Files Changed
 
-| File | Webhook Count |
-| ---- | ------------- |
-| config/api.yml | 1 |
-| settings/notifications.yml | 2 |
+| File | Webhook Count | Success Rate |
+| ---- | ------------- | ------------ |
+| config/api.yml | 1 | 100% |
+| settings/notifications.yml | 2 | 50% |
 
 ## Webhook Executions
 
-| File | Webhook | Status | Duration |
-| ---- | ------- | ------ | -------- |
-| config/api.yml | https://example.com/webhook1 | ✅ success | 340ms |
-| settings/notifications.yml | https://example.com/webhook2 | ✅ success | 220ms |
-| settings/notifications.yml | https://example.com/webhook3 | ❌ failed | - |
+| File | Webhook | Status | Duration | Timestamp |
+| ---- | ------- | ------ | -------- | --------- |
+| config/api.yml | https://example.com/webhook1 | ✅ success | 340ms | 12:30:45 |
+| settings/notifications.yml | https://example.com/webhook2 | ✅ success | 220ms | 12:30:46 |
+| settings/notifications.yml | https://example.com/webhook3 | ❌ failed | - | 12:30:47 |
+
+## Overall Statistics
+
+- **Total Webhooks:** 3
+- **Successful:** 2
+- **Failed:** 1
+- **Success Rate:** 67%
 ```
 
 ## Use Cases
@@ -127,7 +136,7 @@ For a detailed look at webhook triggers during this workflow run. Total changed 
 
 ### Prerequisites
 
-- Node.js 16+
+- Node.js 20+
 - npm or yarn
 
 ### Setup
@@ -162,10 +171,10 @@ The `dist` directory is only built and included in the repository when a release
 This project uses automated GitHub Actions workflows for releases:
 
 1. When PRs with conventional commit messages are merged to the `main` branch:
-   - The `auto-version.yml` workflow detects the conventional commit format and bumps the version
+   - The `auto-version.yml` workflow uses conventional-changelog-action to analyze commits and determine version bumps:
      - Features (`feat:`) trigger minor version bumps
      - Fixes (`fix:`) trigger patch version bumps
-     - Breaking changes (`BREAKING CHANGE:`) trigger major version bumps
+     - Breaking changes (`BREAKING CHANGE:` or `feat!:`) trigger major version bumps
    - The `release-workflow.yml` automatically creates a release with the new version
 
 2. When a release is created, the `publish.yml` workflow:
@@ -174,6 +183,16 @@ This project uses automated GitHub Actions workflows for releases:
    - Updates the major version tag (e.g., `v1`) and the major.minor version tag (e.g., `v1.0`)
 
 You can also manually trigger a release using the GitHub Actions interface by running the `Release Workflow` with your choice of version bump (patch, minor, or major).
+
+## CI/CD Improvements
+
+This project includes several optimizations in its GitHub Actions workflows:
+
+- **Matrix Testing**: Tests across multiple Node.js versions for compatibility
+- **Dependency Management**: Automated dependency updates with Dependabot
+- **Caching**: Improved build times with artifact and dependency caching
+- **Security Scanning**: Weekly security audits of dependencies
+- **Conventional Commits**: Automated versioning based on commit messages
 
 ## Contributing
 
