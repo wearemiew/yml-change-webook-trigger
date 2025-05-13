@@ -1,0 +1,199 @@
+name: Release Workflow
+
+on:
+  workflow_run:
+    workflows: ["Auto Version Update"]
+    types:
+      - completed
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      # Download workflow artifacts to get version info
+      - name: Download workflow artifact
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: auto-version.yml
+          workflow_conclusion: success
+          name: version-info
+          path: artifacts
+      
+      # Read artifact containing version info if it exists
+      - name: Check for version artifact
+        id: check-artifact
+        run: |
+          if [ -f "artifacts/version-info.json" ]; then
+            echo "artifact_exists=true" >> $GITHUB_OUTPUT
+            cat artifacts/version-info.json
+            NEW_VERSION=$(cat artifacts/version-info.json | jq -r '.new_version')
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            SHOULD_RELEASE=$(cat artifacts/version-info.json | jq -r '.should_release')
+            echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+          else
+            echo "No version artifact found. Checking commits directly."
+            echo "artifact_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # If no artifact, check recent commits for version bumps
+      - name: Checkout code (if no artifact)
+        if: steps.check-artifact.outputs.artifact_exists != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+
+      - name: Check for version bump in recent commits
+        if: steps.check-artifact.outputs.artifact_exists != 'true'
+        id: check-commits
+        run: |
+          if git log -3 --pretty=format:"%s" | grep -q "bump version to"; then
+            echo "Found version bump commit in recent history"
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "No version bump commit found in recent history"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Proceed with release if artifact or commit indicates we should release
+      - name: Setup release
+        if: steps.check-artifact.outputs.should_release == 'true' || steps.check-commits.outputs.should_release == 'true'
+        id: setup-release
+        run: |
+          # Determine version
+          if [ "${{ steps.check-artifact.outputs.artifact_exists }}" == "true" ]; then
+            NEW_VERSION=${{ steps.check-artifact.outputs.new_version }}
+          else
+            NEW_VERSION=${{ steps.check-commits.outputs.new_version }}
+          fi
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Preparing to create release for version v$NEW_VERSION"
+
+      # Checkout the repository for release
+      - name: Checkout code for release
+        if: steps.setup-release.outputs.version != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      # Setup Node.js environment
+      - name: Setup Node.js
+        if: steps.setup-release.outputs.version != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      # Install dependencies
+      - name: Install dependencies
+        if: steps.setup-release.outputs.version != ''
+        run: npm ci
+      
+      # Run tests to ensure everything is working
+      - name: Run tests
+        if: steps.setup-release.outputs.version != ''
+        run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
+        shell: bash
+      
+      # Build the action using ncc (creates the dist directory)
+      - name: Build action
+        if: steps.setup-release.outputs.version != ''
+        run: npm run build
+      
+      # Force add dist directory (even if it's in .gitignore)
+      - name: Commit built files
+        if: steps.setup-release.outputs.version != ''
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -f dist/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Build dist files for v${{ steps.setup-release.outputs.version }}"
+            git push
+          fi
+      
+      # Verify tag doesn't exist before creating release
+      - name: Check if tag exists
+        if: steps.setup-release.outputs.version != ''
+        id: tag-check
+        run: |
+          VERSION="${{ steps.setup-release.outputs.release_version }}"
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION"; then
+            echo "Tag $VERSION already exists. Will update it."
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $VERSION does not exist yet. Will create it."
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Delete existing tag if it exists
+      - name: Delete existing tag
+        if: steps.setup-release.outputs.version != '' && steps.tag-check.outputs.tag_exists == 'true'
+        run: |
+          VERSION="${{ steps.setup-release.outputs.release_version }}"
+          git push --delete origin $VERSION || true
+      
+      # Create a new release
+      - name: Create Release
+        if: steps.setup-release.outputs.version != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.setup-release.outputs.release_version }}
+          name: Release ${{ steps.setup-release.outputs.release_version }}
+          body: |
+            Automated release for version ${{ steps.setup-release.outputs.release_version }}
+            
+            This release was automatically created after the version was bumped by a PR merge.
+            
+            ## What's Changed
+            * See the [commit history](https://github.com/${{ github.repository }}/commits/main) for details of changes since the last release.
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.setup-release.outputs.release_version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Create or update the major version tag (e.g., v1, v2) and other version tags
+      - name: Update version tags
+        if: steps.setup-release.outputs.version != ''
+        run: |
+          VERSION="${{ steps.setup-release.outputs.release_version }}"
+          # Remove 'v' prefix if present
+          VERSION_NUM=${VERSION#v}
+          
+          # Extract version components
+          MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
+          MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
+          
+          # Create tags without 'v' prefix if original has it
+          if [[ "$VERSION" == v* ]]; then
+            # Create all version tags
+            echo "Creating/updating version tags"
+            
+            # Major version tag with v prefix (e.g., v1)
+            MAJOR_TAG="v$MAJOR"
+            git tag -d $MAJOR_TAG || true
+            git push origin :refs/tags/$MAJOR_TAG || true
+            git tag $MAJOR_TAG
+            git push origin $MAJOR_TAG
+            echo "Major version tag $MAJOR_TAG now points to release $VERSION"
+            
+            # Major.Minor version tag with v prefix (e.g., v1.0)
+            MAJOR_MINOR_TAG="v$MAJOR.$MINOR"
+            git tag -d $MAJOR_MINOR_TAG || true
+            git push origin :refs/tags/$MAJOR_MINOR_TAG || true
+            git tag $MAJOR_MINOR_TAG
+            git push origin $MAJOR_MINOR_TAG
+            echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION"
+          fi

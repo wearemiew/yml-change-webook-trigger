@@ -5,15 +5,16 @@ on:
     types: [closed]
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'action.yml'
 
 jobs:
   auto-version:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      bump_type: ${{ steps.version-bump.outputs.bump_type }}
+      new_version: ${{ steps.version-update.outputs.new_version }}
+      should_release: ${{ steps.version-update.outputs.should_release }}
     
     steps:
       # Checkout the repository
@@ -88,6 +89,7 @@ jobs:
       
       # Update version in package.json if bump type is not none
       - name: Update package.json version
+        id: version-update
         if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
         run: |
           BUMP_TYPE=${{ steps.version-bump.outputs.bump_type }}
@@ -104,6 +106,7 @@ jobs:
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
           
           # Verify version doesn't already exist as a tag
           if git ls-remote --tags origin | grep -q "refs/tags/v$NEW_VERSION"; then
@@ -121,3 +124,19 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore(release): bump version to $NEW_VERSION [skip ci]"
           git push
+      
+      # Write version info to artifact if update was needed
+      - name: Save version info
+        if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
+        run: |
+          mkdir -p artifacts
+          echo '{"new_version": "${{ steps.version-update.outputs.new_version }}", "should_release": ${{ steps.version-update.outputs.should_release }}}' > artifacts/version-info.json
+          cat artifacts/version-info.json
+      
+      # Upload version info artifact
+      - name: Upload version info artifact
+        if: steps.version-bump.outputs.bump_type != 'none' && steps.filter-ci.outputs.skip != 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: version-info
+          path: artifacts/version-info.json
