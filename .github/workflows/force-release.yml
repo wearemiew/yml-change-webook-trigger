@@ -1,0 +1,143 @@
+name: Force Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type of version bump to perform'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      skip_checks:
+        description: 'Skip existing version checks'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  force-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      # Setup Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+      
+      # Update version in package.json
+      - name: Update package.json version
+        id: version-update
+        run: |
+          BUMP_TYPE="${{ github.event.inputs.version_bump }}"
+          echo "Bumping version: $BUMP_TYPE"
+          
+          # Get current version before bump
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Use npm version to update the version in package.json
+          npm version $BUMP_TYPE --no-git-tag-version
+          
+          # Get the new version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Show diff
+          git diff package.json
+      
+      # Run tests to ensure everything is working
+      - name: Run tests
+        run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
+        shell: bash
+      
+      # Build the action using ncc (creates the dist directory)
+      - name: Build action
+        run: npm run build
+      
+      # Force add dist directory (even if it's in .gitignore)
+      - name: Commit built files
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -f dist/ package.json package-lock.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Build dist files and bump version to v${{ steps.version-update.outputs.new_version }}"
+            git push
+          fi
+      
+      # Create a new release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version-update.outputs.new_version }}
+          name: Release v${{ steps.version-update.outputs.new_version }}
+          body: |
+            Release for version v${{ steps.version-update.outputs.new_version }}
+            
+            ## What's Changed
+            * Added webhook execution reporting with GitHub Step Summary
+            * Track file-to-webhook relationships during execution
+            * Generate detailed webhook execution report 
+            * Add webhook_results output for downstream actions
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/commits/main
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Create or update the major version tag (e.g., v1, v2) and other version tags
+      - name: Update version tags
+        run: |
+          VERSION="v${{ steps.version-update.outputs.new_version }}"
+          # Remove 'v' prefix if present
+          VERSION_NUM=${VERSION#v}
+          
+          # Extract version components
+          MAJOR=$(echo $VERSION_NUM | cut -d '.' -f 1)
+          MINOR=$(echo $VERSION_NUM | cut -d '.' -f 2)
+          
+          # Create tags without 'v' prefix if original has it
+          if [[ "$VERSION" == v* ]]; then
+            # Create all version tags
+            echo "Creating/updating version tags"
+            
+            # Major version tag with v prefix (e.g., v1)
+            MAJOR_TAG="v$MAJOR"
+            git tag -d $MAJOR_TAG || true
+            git push origin :refs/tags/$MAJOR_TAG || true
+            git tag $MAJOR_TAG
+            git push origin $MAJOR_TAG
+            echo "Major version tag $MAJOR_TAG now points to release $VERSION"
+            
+            # Major.Minor version tag with v prefix (e.g., v1.0)
+            MAJOR_MINOR_TAG="v$MAJOR.$MINOR"
+            git tag -d $MAJOR_MINOR_TAG || true
+            git push origin :refs/tags/$MAJOR_MINOR_TAG || true
+            git tag $MAJOR_MINOR_TAG
+            git push origin $MAJOR_MINOR_TAG
+            echo "Major.Minor version tag $MAJOR_MINOR_TAG now points to release $VERSION"
+          fi
