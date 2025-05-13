@@ -44,7 +44,7 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add -f dist/
-          git diff --quiet && git diff --staged --quiet || git commit -m "Build dist files for release ${{ github.event.release.tag_name }}"
+          git diff --quiet && git diff --staged --quiet || git commit -m "ci: Build dist files for release ${{ github.event.release.tag_name }}"
           git push
 
       # Update the release with the built files
