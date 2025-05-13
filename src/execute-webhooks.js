@@ -81,7 +81,7 @@ function maskUrl(url) {
 
     return `${urlObj.protocol}//${host}${path}`;
   } catch (e) {
-    // If URL parsing fails, return a generic masked version.
+    // If URL parsing fails, return a generic masked version
     return url.substring(0, 10) + '...' + url.substring(url.length - 5);
   }
 }
