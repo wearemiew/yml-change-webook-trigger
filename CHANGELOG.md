@@ -1,9 +1,17 @@
-# [1.4.0](https://github.com/wearemiew/yml-change-webhook-trigger/compare/v1.3.1...v1.4.0) (2025-05-13)
+# [1.5.0](https://github.com/wearemiew/yml-change-webhook-trigger/compare/v1.4.1...v1.5.0) (2025-05-14)
 
 
 ### Features
 
-* **ci:** enable tag ([e855943](https://github.com/wearemiew/yml-change-webhook-trigger/commit/e85594392784180ea51f8ca459408afb6f12f8a6))
+* **ci:** improve release notes with categorized changes and better formatting ([add10ff](https://github.com/wearemiew/yml-change-webhook-trigger/commit/add10ff694fc8085a44f60afcd01b00e8bfec7b5))
+
+
+
+## [1.4.1](https://github.com/wearemiew/yml-change-webhook-trigger/compare/v1.4.0...v1.4.1) (2025-05-13)
+
+
+
+# [1.4.0](https://github.com/wearemiew/yml-change-webhook-trigger/compare/v1.3.1...v1.4.0) (2025-05-13)
 
 
 
@@ -26,6 +34,7 @@
 ### Features
 
 * **ci:** enable push ([6b98374](https://github.com/wearemiew/yml-change-webhook-trigger/commit/6b983744cce2abdbd53447fef279ff81af1bd856))
+* **ci:** enable tag ([e855943](https://github.com/wearemiew/yml-change-webhook-trigger/commit/e85594392784180ea51f8ca459408afb6f12f8a6))
 * **ci:** implement comprehensive GitHub Actions improvements ([b03094e](https://github.com/wearemiew/yml-change-webhook-trigger/commit/b03094ef0efc5b66e43957885062ac6541f026e6))
 * **ci:** update cicd auto version ([0542032](https://github.com/wearemiew/yml-change-webhook-trigger/commit/054203284e96577ff42222931b310c92a4c7a46d))
 * **webhooks:** enhance execution with retry logic and parallel processing ([bb9f5f2](https://github.com/wearemiew/yml-change-webhook-trigger/commit/bb9f5f2ef4bcd6621fc0f721adbd94d72681a1ef))
@@ -45,27 +54,6 @@
 
 * **reporting:** enhance webhook summary report with statistics ([af65e1a](https://github.com/wearemiew/yml-change-webhook-trigger/commit/af65e1a780a879841d4d95533b96611a82cb8949))
 * **reporting:** enhance webhook summary report with statistics ([9d53214](https://github.com/wearemiew/yml-change-webhook-trigger/commit/9d53214537d4e528627fe907ac933938f66050d9))
-
-
-
-# [1.3.0](https://github.com/wearemiew/yml-change-webhook-trigger/compare/v1.1.0...v1.3.0) (2025-05-13)
-
-
-### Features
-
-* **reporting:** add webhook execution reporting with GitHub Step Summary ([1581bc1](https://github.com/wearemiew/yml-change-webhook-trigger/commit/1581bc1b306bce6d6bc5189b9c4cbffa09addd96))
-* **reporting:** add webhook execution reporting with GitHub Step Summary (again) ([1696042](https://github.com/wearemiew/yml-change-webhook-trigger/commit/169604232cc3d18601722ca8be692e7cdf36c787))
-* **reporting:** add webhook execution reporting with GitHub Step Summary (again) ([dcfbdb5](https://github.com/wearemiew/yml-change-webhook-trigger/commit/dcfbdb56cc09b8b506924409efdc844cdf7f8021))
-* **reporting:** add webhook execution reporting with GitHub Step Summary (again) ([bece732](https://github.com/wearemiew/yml-change-webhook-trigger/commit/bece732ba6178e92dd2df51b671c40a74eb8d88c))
-
-
-
-# [1.1.0](https://github.com/wearemiew/yml-change-webhook-trigger/compare/v1.0.2...v1.1.0) (2025-05-13)
-
-
-### Features
-
-* **reporting:** add webhook execution reporting with GitHub Step Summary ([57df2bf](https://github.com/wearemiew/yml-change-webhook-trigger/commit/57df2bf1cc43a2a6879d444244881081b78e1e24))
 
 
 
