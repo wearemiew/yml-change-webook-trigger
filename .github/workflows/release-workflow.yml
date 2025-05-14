@@ -250,6 +250,7 @@ jobs:
       - name: Generate Release Notes
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         id: generate-notes
+        shell: bash
         run: |
           VERSION_TAG="${{ steps.setup-release.outputs.release_version }}"
           PREV_VERSION="${{ steps.setup-release.outputs.previous_version }}"
@@ -269,76 +270,73 @@ jobs:
           OTHER=$(echo "$COMMIT_LIST" | grep -v -i "feat\|feature\|add\|fix\|bug\|issue\|resolve\|refactor\|improve\|enhancement\|perf\|performance\|doc\|docs\|documentation\|chore\|ci\|build\|test" || echo "")
 
           # Start building release notes with proper Markdown formatting
+
           NOTES="# 🚀 Release $VERSION_TAG\n\n"
-
           # Add overview section
-          NOTES+="## Overview\n"
-          NOTES+="This release includes updates to the YML Change Webhook Trigger GitHub Action "
-          NOTES+="with improvements to reliability and functionality for detecting YML changes and triggering webhooks.\n\n"
-
-          # Build changes sections based on what we found
+          NOTES="$NOTES## Overview\n"
+          NOTES="$NOTESThis release includes updates to the YML Change Webhook Trigger GitHub Action with improvements to reliability and functionality for detecting YML changes and triggering webhooks.\n\n"
           CHANGES_ADDED=false
 
           # Process feature changes
           if [ -n "$FEATURES" ]; then
-            NOTES+="## ✨ New Features\n"
+            NOTES="$NOTES## ✨ New Features\n"
             while IFS= read -r line; do
               if [ -n "$line" ]; then
                 COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (feat\(.*\): |feature: |feat: |add: )?/- /')
-                NOTES+="$COMMIT_MSG\n"
+                NOTES="$NOTES$COMMIT_MSG\n"
               fi
             done <<< "$FEATURES"
-            NOTES+="\n"
+            NOTES="$NOTES\n"
             CHANGES_ADDED=true
           fi
 
           # Process bug fixes
           if [ -n "$FIXES" ]; then
-            NOTES+="## 🐛 Bug Fixes\n"
+            NOTES="$NOTES## 🐛 Bug Fixes\n"
             while IFS= read -r line; do
               if [ -n "$line" ]; then
                 COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (fix\(.*\): |bug: |fix: |issue: )?/- /')
-                NOTES+="$COMMIT_MSG\n"
+                NOTES="$NOTES$COMMIT_MSG\n"
               fi
             done <<< "$FIXES"
-            NOTES+="\n"
+            NOTES="$NOTES\n"
             CHANGES_ADDED=true
           fi
 
           # Process improvements and refactors
           if [ -n "$REFACTORS" ]; then
-            NOTES+="## 🔧 Improvements\n"
+            NOTES="$NOTES## 🔧 Improvements\n"
             while IFS= read -r line; do
               if [ -n "$line" ]; then
                 COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (refactor\(.*\): |improve: |perf: |enhancement: )?/- /')
-                NOTES+="$COMMIT_MSG\n"
+                NOTES="$NOTES$COMMIT_MSG\n"
               fi
             done <<< "$REFACTORS"
-            NOTES+="\n"
+            NOTES="$NOTES\n"
             CHANGES_ADDED=true
           fi
 
           # Process documentation updates
           if [ -n "$DOCS" ]; then
-            NOTES+="## 📝 Documentation\n"
+            NOTES="$NOTES## 📝 Documentation\n"
             while IFS= read -r line; do
               if [ -n "$line" ]; then
                 COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (doc\(.*\): |docs: |documentation: )?/- /')
-                NOTES+="$COMMIT_MSG\n"
+                NOTES="$NOTES$COMMIT_MSG\n"
               fi
             done <<< "$DOCS"
-            NOTES+="\n"
+            NOTES="$NOTES\n"
             CHANGES_ADDED=true
           fi
 
           # Process other changes
           if [ -n "$OTHER" ] || [ -n "$CHORES" ]; then
-            NOTES+="## 🔄 Other Changes\n"
+            NOTES="$NOTES## 🔄 Other Changes\n"
             if [ -n "$CHORES" ]; then
               while IFS= read -r line; do
                 if [ -n "$line" ]; then
                   COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (chore\(.*\): |ci: |build: |test: )?/- /')
-                  NOTES+="$COMMIT_MSG\n"
+                  NOTES="$NOTES$COMMIT_MSG\n"
                 fi
               done <<< "$CHORES"
             fi
@@ -346,36 +344,25 @@ jobs:
               while IFS= read -r line; do
                 if [ -n "$line" ]; then
                   COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ /- /')
-                  NOTES+="$COMMIT_MSG\n"
+                  NOTES="$NOTES$COMMIT_MSG\n"
                 fi
               done <<< "$OTHER"
             fi
-            NOTES+="\n"
+            NOTES="$NOTES\n"
             CHANGES_ADDED=true
           fi
 
           # If no specific changes found, add a generic entry
           if [ "$CHANGES_ADDED" = false ]; then
-            NOTES+="## 🔧 What's Changed\n"
-            NOTES+="- General improvements and updates\n\n"
+            NOTES="$NOTES## 🔧 What's Changed\n- General improvements and updates\n\n"
           fi
 
           # Add resources section
-          NOTES+="## 📚 Resources\n"
-          NOTES+="- [Full Changelog](https://github.com/${GITHUB_REPOSITORY}/compare/$PREV_VERSION...$VERSION_TAG)\n"
-          NOTES+="- [Commit History](https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG)\n"
-          NOTES+="- [Report Issues](https://github.com/${GITHUB_REPOSITORY}/issues)\n\n"
-
+          NOTES="$NOTES## 📚 Resources\n- [Full Changelog](https://github.com/${GITHUB_REPOSITORY}/compare/$PREV_VERSION...$VERSION_TAG)\n- [Commit History](https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG)\n- [Report Issues](https://github.com/${GITHUB_REPOSITORY}/issues)\n\n"
           # Add usage section
-          NOTES+="## 📋 Usage\n"
-          NOTES+="Add this action to your GitHub workflows by referencing:\n"
-          NOTES+="```yaml\n"
-          NOTES+="- uses: ${GITHUB_REPOSITORY}@$VERSION_TAG\n"
-          NOTES+="```\n\n"
-
+          NOTES="$NOTES## 📋 Usage\nAdd this action to your GitHub workflows by referencing:\n\`\`\`yaml\n- uses: ${GITHUB_REPOSITORY}@$VERSION_TAG\n\`\`\`\n\n"
           # Add footer
-          NOTES+="---\n"
-          NOTES+="✨ *This release was automatically generated through our CI/CD pipeline as part of our commitment to continuous improvement.*"
+          NOTES="$NOTES---\n✨ *This release was automatically generated through our CI/CD pipeline as part of our commitment to continuous improvement.*"
 
           # Save notes for later use
           echo "$NOTES" > release-notes.md
