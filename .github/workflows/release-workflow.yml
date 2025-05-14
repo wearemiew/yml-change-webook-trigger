@@ -5,7 +5,7 @@ name: Release Workflow
 # - Workflow dispatch (manual trigger with version choice)
 # - When Auto Version Update workflow completes successfully
 # Outputs:
-# - GitHub release
+# - GitHub release with auto-generated changelog
 # - Updated version tags
 
 on:
@@ -81,7 +81,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 5 # Fetch last 5 commits, adjust if more history is needed for version checks
+          fetch-depth: 0 # Fetch full history for better commit analysis
 
       # Step 4: Manual version bump (only for workflow_dispatch trigger)
       # If the workflow is triggered manually, this step bumps the version in package.json
@@ -96,6 +96,7 @@ jobs:
           # Get current version from package.json
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "Current version: $CURRENT_VERSION"
+          echo "previous_version=v$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
           # Use npm version to update the version in package.json and package-lock.json
           # --no-git-tag-version prevents npm from creating a git tag itself, as we'll do it later.
@@ -142,9 +143,18 @@ jobs:
           NEW_VERSION_PKG=$(node -p "try { require('./package.json').version } catch (e) { 'unknown' }")
           echo "Current package.json version: $NEW_VERSION_PKG"
 
+          # Try to find the previous version tag
+          PREV_VERSION_TAG=$(git tag --sort=-creatordate | head -n 1)
+          if [ -z "$PREV_VERSION_TAG" ]; then
+            PREV_VERSION_TAG="v0.0.0"
+          fi
+          echo "Previous version from tags: $PREV_VERSION_TAG"
+          echo "previous_version=$PREV_VERSION_TAG" >> $GITHUB_OUTPUT
+
           if [ "$NEW_VERSION_PKG" != "unknown" ]; then
             echo "Found version $NEW_VERSION_PKG in package.json."
             echo "new_version=$NEW_VERSION_PKG" >> $GITHUB_OUTPUT
+            echo "release_version=v$NEW_VERSION_PKG" >> $GITHUB_OUTPUT
             echo "should_release=true" >> $GITHUB_OUTPUT # Assume if version is found, we should release
           elif git log -3 --pretty=format:"%s" | grep -q "bump version to"; then
             # Fallback: Check recent commits for version bump messages
@@ -155,15 +165,19 @@ jobs:
             if [ "$BUMP_VERSION" != "unknown" ]; then
               echo "Extracted version $BUMP_VERSION from commit message."
               echo "new_version=$BUMP_VERSION" >> $GITHUB_OUTPUT
+              echo "release_version=v$BUMP_VERSION" >> $GITHUB_OUTPUT
             else
               # If extraction fails, default to package.json version (even if it was 'unknown' before, try again or set as unknown)
               echo "Could not extract version from commit. Using package.json version as fallback."
               echo "new_version=$NEW_VERSION_PKG" >> $GITHUB_OUTPUT # This might be 'unknown'
+              echo "release_version=v$NEW_VERSION_PKG" >> $GITHUB_OUTPUT
             fi
             echo "should_release=true" >> $GITHUB_OUTPUT
           else
             echo "No version bump commit found in recent history and package.json version is unknown or not found."
             echo "new_version=unknown" >> $GITHUB_OUTPUT
+            echo "release_version=unknown" >> $GITHUB_OUTPUT
+            echo "previous_version=unknown" >> $GITHUB_OUTPUT
             echo "should_release=false" >> $GITHUB_OUTPUT
           fi
 
@@ -174,21 +188,35 @@ jobs:
         id: setup-release
         run: |
           NEW_VERSION=""
+          RELEASE_VERSION=""
+          PREVIOUS_VERSION=""
           SHOULD_RELEASE="false"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # For manual trigger, use version from the manual-version step
             NEW_VERSION="${{ steps.manual-version.outputs.version }}"
+            RELEASE_VERSION="${{ steps.manual-version.outputs.release_version }}"
+            PREVIOUS_VERSION="${{ steps.manual-version.outputs.previous_version }}"
             SHOULD_RELEASE="true"
             echo "Source: Manual trigger (workflow_dispatch)"
           elif [ "${{ steps.check-artifact.outputs.artifact_exists }}" == "true" ]; then
             # If artifact exists, use version from the artifact
             NEW_VERSION="${{ steps.check-artifact.outputs.new_version }}"
+            RELEASE_VERSION="v$NEW_VERSION"
             SHOULD_RELEASE="${{ steps.check-artifact.outputs.should_release }}"
+            # Try to get previous version from tags
+            PREV_TAG=$(git tag --sort=-creatordate | grep -v "v$NEW_VERSION" | head -n 1)
+            if [ -n "$PREV_TAG" ]; then
+              PREVIOUS_VERSION="$PREV_TAG"
+            else
+              PREVIOUS_VERSION="v0.0.0"
+            fi
             echo "Source: Version artifact"
           elif [ "${{ steps.check-commits.outputs.should_release }}" == "true" ]; then
             # If no artifact but commits check yielded a version, use that
             NEW_VERSION="${{ steps.check-commits.outputs.new_version }}"
+            RELEASE_VERSION="${{ steps.check-commits.outputs.release_version }}"
+            PREVIOUS_VERSION="${{ steps.check-commits.outputs.previous_version }}"
             SHOULD_RELEASE="true" # If check-commits decided to release, honor it
             echo "Source: Commit history / package.json fallback"
           else
@@ -202,22 +230,170 @@ jobs:
             # Set outputs even if not releasing to avoid errors in later steps' conditions
             echo "version=unknown" >> $GITHUB_OUTPUT
             echo "release_version=unknown" >> $GITHUB_OUTPUT
+            echo "previous_version=unknown" >> $GITHUB_OUTPUT
             echo "should_release=false" >> $GITHUB_OUTPUT
           else
             echo "Version to release: $NEW_VERSION"
             echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "release_version=v$NEW_VERSION" >> $GITHUB_OUTPUT # e.g. v1.2.3
+            echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT # e.g. v1.2.3
+            echo "previous_version=$PREVIOUS_VERSION" >> $GITHUB_OUTPUT
             echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
           fi
 
           if [ "$SHOULD_RELEASE" == "true" ]; then
-            echo "Preparing to create release for version v$NEW_VERSION"
+            echo "Preparing to create release for version $RELEASE_VERSION (comparing with $PREVIOUS_VERSION)"
           else
             echo "Skipping release creation as should_release is false or version is unknown."
           fi
 
-      # Step 7: Setup Node.js environment
-      # Only run if a release is determined to be necessary and a valid version is found.
+      # Step 7: Generate release notes from commits
+      - name: Generate Release Notes
+        if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
+        id: generate-notes
+        run: |
+          VERSION_TAG="${{ steps.setup-release.outputs.release_version }}"
+          PREV_VERSION="${{ steps.setup-release.outputs.previous_version }}"
+          
+          echo "Generating release notes for $VERSION_TAG (comparing with $PREV_VERSION)"
+          
+          # Extract relevant commits between previous tag and current
+          echo "Finding commits between $PREV_VERSION and HEAD..."
+          COMMIT_LIST=$(git log --pretty=format:"%h %s" $PREV_VERSION..HEAD | grep -v "Merge\|bump version\|Build and version\|\[skip ci\]" || echo "")
+          
+          # Process commits into categories
+          FEATURES=$(echo "$COMMIT_LIST" | grep -i "feat\|feature\|add" || echo "")
+          FIXES=$(echo "$COMMIT_LIST" | grep -i "fix\|bug\|issue\|resolve" || echo "")
+          REFACTORS=$(echo "$COMMIT_LIST" | grep -i "refactor\|improve\|enhancement\|perf\|performance" || echo "")
+          DOCS=$(echo "$COMMIT_LIST" | grep -i "doc\|docs\|documentation" || echo "")
+          CHORES=$(echo "$COMMIT_LIST" | grep -i "chore\|ci\|build\|test" || echo "")
+          OTHER=$(echo "$COMMIT_LIST" | grep -v -i "feat\|feature\|add\|fix\|bug\|issue\|resolve\|refactor\|improve\|enhancement\|perf\|performance\|doc\|docs\|documentation\|chore\|ci\|build\|test" || echo "")
+          
+          # Start building release notes with proper Markdown formatting
+          NOTES="# 🚀 Release $VERSION_TAG\n\n"
+          
+          # Add overview section
+          NOTES+="## Overview\n"
+          NOTES+="This release includes updates to the YML Change Webhook Trigger GitHub Action "
+          NOTES+="with improvements to reliability and functionality for detecting YML changes and triggering webhooks.\n\n"
+          
+          # Build changes sections based on what we found
+          CHANGES_ADDED=false
+          
+          # Process feature changes
+          if [ -n "$FEATURES" ]; then
+            NOTES+="## ✨ New Features\n"
+            echo "$FEATURES" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                # Extract commit message by removing hash and formatting it
+                COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (feat\(.*\): |feature: |feat: |add: )?/- /')
+                NOTES+="$COMMIT_MSG\n"
+              fi
+            done
+            NOTES+="\n"
+            CHANGES_ADDED=true
+          fi
+          
+          # Process bug fixes
+          if [ -n "$FIXES" ]; then
+            NOTES+="## 🐛 Bug Fixes\n"
+            echo "$FIXES" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                # Extract commit message by removing hash and formatting it
+                COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (fix\(.*\): |bug: |fix: |issue: )?/- /')
+                NOTES+="$COMMIT_MSG\n"
+              fi
+            done
+            NOTES+="\n"
+            CHANGES_ADDED=true
+          fi
+          
+          # Process improvements and refactors
+          if [ -n "$REFACTORS" ]; then
+            NOTES+="## 🔧 Improvements\n"
+            echo "$REFACTORS" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                # Extract commit message by removing hash and formatting it
+                COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (refactor\(.*\): |improve: |perf: |enhancement: )?/- /')
+                NOTES+="$COMMIT_MSG\n"
+              fi
+            done
+            NOTES+="\n"
+            CHANGES_ADDED=true
+          fi
+          
+          # Process documentation updates
+          if [ -n "$DOCS" ]; then
+            NOTES+="## 📝 Documentation\n"
+            echo "$DOCS" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                # Extract commit message by removing hash and formatting it
+                COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (doc\(.*\): |docs: |documentation: )?/- /')
+                NOTES+="$COMMIT_MSG\n"
+              fi
+            done
+            NOTES+="\n"
+            CHANGES_ADDED=true
+          fi
+          
+          # Process other changes
+          if [ -n "$OTHER" ] || [ -n "$CHORES" ]; then
+            NOTES+="## 🔄 Other Changes\n"
+            # Add chores first
+            if [ -n "$CHORES" ]; then
+              echo "$CHORES" | while IFS= read -r line; do
+                if [ -n "$line" ]; then
+                  # Extract commit message by removing hash and formatting it
+                  COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ (chore\(.*\): |ci: |build: |test: )?/- /')
+                  NOTES+="$COMMIT_MSG\n"
+                fi
+              done
+            fi
+            # Add other miscellaneous changes
+            if [ -n "$OTHER" ]; then
+              echo "$OTHER" | while IFS= read -r line; do
+                if [ -n "$line" ]; then
+                  # Extract commit message by removing hash and formatting it
+                  COMMIT_MSG=$(echo "$line" | sed -E 's/^[a-f0-9]+ /- /')
+                  NOTES+="$COMMIT_MSG\n"
+                fi
+              done
+            fi
+            NOTES+="\n"
+            CHANGES_ADDED=true
+          fi
+          
+          # If no specific changes found, add a generic entry
+          if [ "$CHANGES_ADDED" = false ]; then
+            NOTES+="## 🔧 What's Changed\n"
+            NOTES+="- General improvements and updates\n\n"
+          fi
+          
+          # Add resources section
+          NOTES+="## 📚 Resources\n"
+          NOTES+="- [Full Changelog](https://github.com/${GITHUB_REPOSITORY}/compare/$PREV_VERSION...$VERSION_TAG)\n"
+          NOTES+="- [Commit History](https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG)\n"
+          NOTES+="- [Report Issues](https://github.com/${GITHUB_REPOSITORY}/issues)\n\n"
+          
+          # Add usage section
+          NOTES+="## 📋 Usage\n"
+          NOTES+="Add this action to your GitHub workflows by referencing:\n"
+          NOTES+="```yaml\n"
+          NOTES+="- uses: ${GITHUB_REPOSITORY}@$VERSION_TAG\n"
+          NOTES+="```\n\n"
+          
+          # Add footer
+          NOTES+="---\n"
+          NOTES+="✨ *This release was automatically generated through our CI/CD pipeline as part of our commitment to continuous improvement.*"
+          
+          # Save notes for later use
+          echo "$NOTES" > release-notes.md
+          
+          # Set output for later use
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # Step 8: Setup Node.js environment
       - name: Setup Node.js
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         uses: actions/setup-node@v4
@@ -225,25 +401,25 @@ jobs:
           node-version: "20" # Specify Node.js version
           cache: "npm" # Cache npm dependencies
 
-      # Step 8: Install dependencies
+      # Step 9: Install dependencies
       - name: Install dependencies
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         run: npm ci # Use 'ci' for cleaner installs in CI environments
 
-      # Step 9: Run tests
+      # Step 10: Run tests
       # Ensures the code is in a good state before building and releasing.
       - name: Run tests
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         run: NODE_ENV=test npx jest --config jest.config.js --passWithNoTests
         shell: bash
 
-      # Step 10: Build the action (e.g., using ncc)
+      # Step 11: Build the action (e.g., using ncc)
       # This step compiles the action code into a 'dist' directory.
       - name: Build action
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         run: npm run build # Assumes 'build' script is defined in package.json (e.g., "build": "ncc build index.js -o dist")
 
-      # Step 11: Commit built files (dist directory)
+      # Step 12: Commit built files (dist directory)
       # The 'dist' directory is often in .gitignore, so '-f' (force) is used to add it.
       # This ensures the compiled action code is part of the commit that the release tag will point to.
       - name: Commit built files
@@ -256,12 +432,11 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit in dist/ directory."
           else
-            git commit -m "ci: Build dist files for v${{ steps.setup-release.outputs.version }} [skip ci]"
+            git commit -m "ci: Build dist files for ${{ steps.setup-release.outputs.release_version }} [skip ci]"
             git push
           fi
 
-      # Step 12: Create or Update GitHub Release
-      # Uses the GitHub CLI (gh) to create a new release or update an existing one.
+      # Step 13: Create or Update GitHub Release with our pretty release notes
       - name: Create or Update Release
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
         env:
@@ -272,31 +447,24 @@ jobs:
 
           echo "Attempting to create or update release for tag: $VERSION_TAG"
 
-          # Check if the release tag already exists on the remote
-          # If it does, we might want to update the tag to point to the current commit.
-          # This is important if the build or version bump happened after the tag was initially pushed by npm (if not using --no-git-tag-version)
-          # or if we are re-running a release for an existing version with updated build artifacts.
-
           # Ensure the local tag exists and points to the current HEAD
           git tag -f $VERSION_TAG HEAD # Force update local tag to current commit
           echo "Updated local tag $VERSION_TAG to point to HEAD."
 
           # Push the tag (and force it if it exists on remote to update it)
-          # This ensures the tag associated with the release points to the commit with the build artifacts.
           echo "Pushing tag $VERSION_TAG to remote. Forcing update if it exists."
           git push origin $VERSION_TAG --force
+
+          # Use the generated release notes
+          RELEASE_NOTES=$(cat release-notes.md)
 
           # Check if the release already exists using GitHub CLI
           if gh release view "$VERSION_TAG" --repo "${{ github.repository }}" &> /dev/null; then
             echo "Release $VERSION_TAG already exists. Updating it."
             # Update the existing release
-            # Note: gh release edit does not allow changing assets directly,
-            # but it can update title, notes, draft status, etc.
-            # If you need to re-upload assets, you might need to delete and recreate or use gh release upload.
-            # For simplicity, this example updates notes and ensures it's not a draft.
             gh release edit "$VERSION_TAG" \
               --title "Release $VERSION_TAG" \
-              --notes $"Automated release for version $VERSION_TAG (updated).\n\nThis release was automatically created/updated after the version was bumped.\n\nWhat's Changed: See the commit history: https://github.com/${GITHUB_REPOSITORY}/commits/main for details of changes since the last release. Changelog: https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG" \
+              --notes "$RELEASE_NOTES" \
               --draft=false \
               --repo "${GITHUB_REPOSITORY}"
             
@@ -306,14 +474,14 @@ jobs:
             # Create a new release
             gh release create "$VERSION_TAG" \
               --title "Release $VERSION_TAG" \
-              --notes $"Automated release for version $VERSION_TAG.\n\nThis release was automatically created after the version was bumped.\n\nWhat's Changed: See the commit history: https://github.com/${GITHUB_REPOSITORY}/commits/main for details of changes since the last release. Changelog: https://github.com/${GITHUB_REPOSITORY}/commits/$VERSION_TAG" \
+              --notes "$RELEASE_NOTES" \
               --draft=false \
               --repo "${GITHUB_REPOSITORY}"
             
             echo "Release $VERSION_TAG created successfully."
           fi
 
-      # Step 13: Update major/minor version tags (e.g., v1, v1.2)
+      # Step 14: Update major/minor version tags (e.g., v1, v1.2)
       # This makes it easy for users to refer to the latest major or major.minor version.
       - name: Update version tags (major, major.minor)
         if: steps.setup-release.outputs.should_release == 'true' && steps.setup-release.outputs.version != 'unknown'
